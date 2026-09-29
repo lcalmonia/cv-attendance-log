@@ -377,7 +377,11 @@ async function handle(request: Request) {
       if(!e)return json({error:'Employee not found.'},404);
       try{
         await withTransaction(async (client) => {
-          await client.query('DELETE FROM employees WHERE id=$1',[id]);
+          // Explicitly remove the authentication/session chain first, then let
+          // the users -> employees foreign-key cascade remove employee data.
+          await client.query('DELETE FROM sessions WHERE user_id=$1',[e.user_id]);
+          await client.query('DELETE FROM auth_accounts WHERE user_id=$1',[e.user_id]);
+          await client.query('DELETE FROM users WHERE id=$1',[e.user_id]);
         });
       }catch(e:any){
         if(e?.code==='23503')return json({error:'This employee cannot be deleted because related records are still in use.'},409);

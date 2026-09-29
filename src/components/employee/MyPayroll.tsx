@@ -10,35 +10,65 @@ import {
   ShieldCheck,
   Building2,
 } from 'lucide-react';
-import { PayrollRecord } from '../../types';
+import { PayrollPeriod, PayrollRecord } from '../../types';
 import { api } from '../../services/api';
 import { PayslipModal } from '../PayslipModal';
 
 export const MyPayroll: React.FC = () => {
   const [payroll, setPayroll] = useState<PayrollRecord | null>(null);
+  const [payrollPeriods, setPayrollPeriods] = useState<PayrollPeriod[]>([]);
+  const [selectedPeriodId, setSelectedPeriodId] = useState('');
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState(false);
   const [payslipOpen, setPayslipOpen] = useState(false);
   const [message, setMessage] = useState('');
 
-  const loadPayroll = async () => {
+  const loadPayrollPeriods = async () => {
     setLoading(true);
     try {
-      const data = await api.employee.getPayroll();
+      const periods = await api.employee.getPayrollPeriods();
+      setPayrollPeriods(periods);
+      const currentPeriodId = periods[0]?.id || '';
+      setSelectedPeriodId(currentPeriodId);
+      if (currentPeriodId) {
+        const data = await api.employee.getPayroll(currentPeriodId);
+        setPayroll(data);
+      } else {
+        setPayroll(null);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setPayroll(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPayroll = async (periodId: string) => {
+    setLoading(true);
+    try {
+      const data = await api.employee.getPayroll(periodId);
       setPayroll(data);
     } catch (err: any) {
       console.error(err);
+      setPayroll(null);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadPayroll();
+    loadPayrollPeriods();
   }, []);
 
+  const handlePeriodChange = async (periodId: string) => {
+    setSelectedPeriodId(periodId);
+    setMessage('');
+    await loadPayroll(periodId);
+  };
+
   const handleApprove = async () => {
-    if (!payroll) return;
+    if (!payroll || !isCurrentPayroll) return;
     setApproving(true);
     try {
       const res = await api.employee.approvePayroll(payroll.payrollPeriodId);
@@ -67,6 +97,8 @@ export const MyPayroll: React.FC = () => {
     );
   }
 
+  const isCurrentPayroll = payrollPeriods[0]?.id === payroll.payrollPeriodId;
+  const isPreviousPayroll = payrollPeriods[1]?.id === payroll.payrollPeriodId;
   const isTentative = payroll.status === 'open';
   const isForApproval = payroll.status === 'for_approval';
   const isApproved = Boolean(payroll.employeeApprovedAt);
@@ -76,7 +108,26 @@ export const MyPayroll: React.FC = () => {
     <div className="space-y-6">
       {/* Header & Status Notice */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+        <div className="space-y-2">
+          {payrollPeriods.length > 1 && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <label htmlFor="employee-payroll-period" className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Payroll Reference
+              </label>
+              <select
+                id="employee-payroll-period"
+                value={selectedPeriodId}
+                onChange={(e) => handlePeriodChange(e.target.value)}
+                className="w-full sm:w-auto min-w-[280px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {payrollPeriods.map((period, index) => (
+                  <option key={period.id} value={period.id}>
+                    {index === 0 ? 'Current Payroll' : 'Previous Payroll'} — {period.startDate} to {period.endDate}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-2xl font-bold text-white tracking-tight">My Payroll Summary</h1>
             {isTentative && (
@@ -84,7 +135,7 @@ export const MyPayroll: React.FC = () => {
                 Tentative Payroll
               </span>
             )}
-            {isForApproval && (
+            {isCurrentPayroll && isForApproval && (
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 For Approval
               </span>
@@ -94,11 +145,18 @@ export const MyPayroll: React.FC = () => {
                 Finalized
               </span>
             )}
+            {isPreviousPayroll && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase bg-slate-700/60 text-slate-300 border border-slate-600">
+                Previous Payroll
+              </span>
+            )}
           </div>
           <p className="text-sm text-slate-400">
-            {isTentative
-              ? 'Estimated salary calculation based on current cut-off clock logs. Not final salary.'
-              : 'Official salary computation for the current payroll cut-off.'}
+            {isPreviousPayroll
+              ? 'Reference only. Older payroll periods are not available in the employee portal.'
+              : isTentative
+                ? 'Estimated salary calculation based on current cut-off clock logs. Not final salary.'
+                : 'Official salary computation for the current payroll cut-off.'}
           </p>
         </div>
 
@@ -110,6 +168,12 @@ export const MyPayroll: React.FC = () => {
           <span>View / Print Payslip</span>
         </button>
       </div>
+
+      {isPreviousPayroll && (
+        <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 text-slate-300 text-xs">
+          This is your most recent previous payroll for reference. Only the current payroll and this one previous payroll are available here.
+        </div>
+      )}
 
       {message && (
         <div className="p-3 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs flex items-center gap-2">

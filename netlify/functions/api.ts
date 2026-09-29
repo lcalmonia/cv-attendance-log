@@ -10,7 +10,21 @@ const db = {
   },
   pool: database.pool,
 };
-const MAX_AGE = 7 * 24 * 60 * 60;
+const MAX_AGE = 7 * 24 * 60 * 60;\nasync function withTransaction<T>(work: (client: any) => Promise<T>) {
+  const client = await database.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
@@ -221,8 +235,20 @@ async function handle(request: Request) {
       if(exists.rows[0]) return json({error:'Initial administrator setup has already been completed.'},403);
       if(!b.fullName||!b.employeeId||!b.password) return json({error:'Name, employee ID, and password are required.'},400);
       const userId=`usr_${randomBytes(8).toString('hex')}`, now=new Date().toISOString();
-      await db.sql`INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,status,must_change_password) VALUES(${userId},${b.employeeId},${b.fullName},${b.email||''},${b.mobileNumber||''},'super_admin','active',false)`;
-      await db.sql`INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES(${userId},${norm(b.employeeId)},${normMobile(b.mobileNumber)||null},${hashPassword(String(b.password))},false,true,${now},${now})`;
+      const loginId=norm(b.employeeId), mobileLogin=normMobile(b.mobileNumber)||null, passwordHash=hashPassword(String(b.password));
+      if((await db.sql`SELECT 1 FROM users WHERE lower(employee_id)=lower(${b.employeeId}) LIMIT 1`).rows[0]) return json({error:'This Employee ID is already in use.'},400);
+      if((await db.sql`SELECT 1 FROM auth_accounts WHERE login_id=${loginId} LIMIT 1`).rows[0]) return json({error:'This Employee ID is already in use for login.'},400);
+      if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} LIMIT 1`).rows[0]) return json({error:'This mobile number is already in use.'},400);
+      await withTransaction(async (client) => {
+        await client.query(
+          'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','super_admin','active',false]
+        );
+        await client.query(
+          'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [userId,loginId,mobileLogin,passwordHash,false,true,now,now]
+        );
+      });
       return json({success:true});
     }
     if(path==='auth/login'&&m==='POST'){
@@ -284,10 +310,25 @@ async function handle(request: Request) {
       const biz=(await db.sql`SELECT id FROM businesses WHERE id=${b.businessId} AND status='active'`).rows[0]; if(!biz)return json({error:'Selected business does not exist or is inactive.'},400);
       if((await db.sql`SELECT 1 FROM employees WHERE lower(employee_id)=lower(${b.employeeId})`).rows[0])return json({error:'An employee with this Employee ID already exists.'},400);
       const userId=`usr_${randomBytes(8).toString('hex')}`, empId=`emp_${randomBytes(8).toString('hex')}`, now=new Date().toISOString(), status=b.status||'active';
-      await db.sql`INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,business_id,status,must_change_password) VALUES(${userId},${b.employeeId},${b.fullName},${b.email||''},${b.mobileNumber||''},'employee',${b.businessId},${status},true)`;
-      await db.sql`INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES(${userId},${norm(b.employeeId)},${normMobile(b.mobileNumber)||null},${hashPassword(norm(b.employeeId))},true,${status==='active'},${now},${now})`;
+      const loginId=norm(b.employeeId), mobileLogin=normMobile(b.mobileNumber)||null;
+      if((await db.sql`SELECT 1 FROM users WHERE lower(employee_id)=lower(${b.employeeId}) LIMIT 1`).rows[0])return json({error:'An account with this Employee ID already exists.'},400);
+      if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} LIMIT 1`).rows[0])return json({error:'An account with this mobile number already exists.'},400);
+      const userId=`usr_${randomBytes(8).toString('hex')}`, empId=`emp_${randomBytes(8).toString('hex')}`, now=new Date().toISOString(), status=b.status||'active';
       const emp={id:empId,userId,employeeId:b.employeeId,businessId:b.businessId,fullName:b.fullName,mobileNumber:b.mobileNumber||'',email:b.email||'',position:b.position||'Staff',employmentStatus:b.employmentStatus||'regular',dateHired:b.dateHired||phNow().date,dailyRate:Number(b.dailyRate||600),requiredHoursPerDay:Number(b.requiredHoursPerDay||8),status};
-      await db.sql`INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES(${emp.id},${emp.userId},${emp.employeeId},${emp.businessId},${emp.fullName},${emp.mobileNumber},${emp.email},${emp.position},${emp.employmentStatus},${emp.dateHired},${emp.dailyRate},${emp.requiredHoursPerDay},${emp.status})`;
+      await withTransaction(async (client) => {
+        await client.query(
+          'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,business_id,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','employee',b.businessId,status,true]
+        );
+        await client.query(
+          'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+          [userId,loginId,mobileLogin,hashPassword(norm(b.employeeId)),true,status==='active',now,now]
+        );
+        await client.query(
+          'INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+          [emp.id,emp.userId,emp.employeeId,emp.businessId,emp.fullName,emp.mobileNumber,emp.email,emp.position,emp.employmentStatus,emp.dateHired,emp.dailyRate,emp.requiredHoursPerDay,emp.status]
+        );
+      });
       return json(emp);
     }
     if(path.startsWith('admin/employees/')&&path.endsWith('/reset-password')&&m==='POST'&&isAdmin(u)){

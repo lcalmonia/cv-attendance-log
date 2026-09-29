@@ -237,7 +237,7 @@ export const MyPayroll: React.FC = () => {
             ₱{payroll.grossPay.toLocaleString()}
           </div>
           <span className="text-xs text-slate-500 mt-1 block">
-            Basic pay ({payroll.daysWorked} days) + incentives
+            Base duty pay + overtime + night differential + incentives
           </span>
         </div>
 

@@ -199,6 +199,7 @@ export const api = {
   // Employee APIs
   employee: {
     getPeriods: () => request<PayrollPeriod[]>('/api/employee/periods'),
+    getPayrollPeriods: () => request<PayrollPeriod[]>('/api/employee/payroll-periods'),
     getDashboard: () =>
       request<{
         employeeName: string;

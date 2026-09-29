@@ -8,6 +8,7 @@ const db = {
     const rows = await database.sql(strings, ...values as any[]);
     return { rows: Array.isArray(rows) ? rows : (rows as any)?.rows || [] };
   },
+  pool: database.pool,
 };
 const MAX_AGE = 7 * 24 * 60 * 60;
 

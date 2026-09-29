@@ -13,6 +13,34 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
 const norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
 const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 const normMobile = (v: unknown) => { const d = digits(v); return d.length >= 10 ? d.slice(-10) : d; };
+function minutesBetweenTimes(start: unknown, end: unknown) {
+  if (!start || !end) return 0;
+  const s = String(start), e = String(end);
+  const asDate = (v: string) => {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const sd = asDate(s), ed = asDate(e);
+  if (sd && ed) return Math.max(0, Math.round((ed.getTime() - sd.getTime()) / 60000));
+  const parts = (v: string) => {
+    const m = v.match(/(\\d{1,2}):(\\d{2})/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const sm = parts(s), em = parts(e);
+  if (sm == null || em == null) return 0;
+  return Math.max(0, (em - sm + 1440) % 1440);
+}
+function scheduleBreakMinutes(s: any) {
+  return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
+}
+function normalizedWorkMinutes(a: any, s: any) {
+  const elapsed = minutesBetweenTimes(a?.time_in, a?.time_out);
+  const requiredBreak = scheduleBreakMinutes(s);
+  const actualBreak = a?.break_out && a?.break_in ? minutesBetweenTimes(a.break_out, a.break_in) : 0;
+  const effectiveBreak = Math.max(requiredBreak, actualBreak);
+  return Math.max(0, elapsed - effectiveBreak);
+}
+
 const hashToken = (v: string) => createHash('sha256').update(v).digest('hex');
 function hashPassword(password: string, salt = randomBytes(16).toString('hex')) {
   if (password.length < 6) throw new Error('Password must be at least 6 characters.');

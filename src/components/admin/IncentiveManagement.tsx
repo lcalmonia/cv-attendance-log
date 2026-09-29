@@ -15,8 +15,10 @@ export const IncentiveManagement: React.FC = () => {
     name: '',
     description: '',
     amount: 1000,
+    incentiveType: 'attendance' as 'attendance' | 'other',
     requireNoLate: true,
     requireNoAbsence: true,
+    requireNoUndertime: true,
     status: 'active' as any,
     effectiveDate: new Date().toISOString().slice(0, 10),
   });
@@ -68,8 +70,10 @@ export const IncentiveManagement: React.FC = () => {
       name: inc.name,
       description: inc.description || '',
       amount: inc.amount,
+      incentiveType: inc.incentiveType,
       requireNoLate: inc.requireNoLate,
       requireNoAbsence: inc.requireNoAbsence,
+      requireNoUndertime: inc.requireNoUndertime,
       status: inc.status,
       effectiveDate: inc.effectiveDate,
     });
@@ -189,14 +193,20 @@ export const IncentiveManagement: React.FC = () => {
                       ₱{inc.amount.toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-xs space-y-1">
-                      {inc.requireNoAbsence && (
+                      <div className="inline-flex items-center px-2 py-0.5 rounded bg-blue-950/50 text-blue-300 mr-1.5 mb-1">{inc.incentiveType === 'attendance' ? 'Attendance Incentive' : 'Other Incentive'}</div>
+                      {inc.incentiveType === 'attendance' && inc.requireNoAbsence && (
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300 mr-1.5">
                           <span>Zero Absences on Duty Days</span>
                         </div>
                       )}
-                      {inc.requireNoLate && (
+                      {inc.incentiveType === 'attendance' && inc.requireNoLate && (
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300">
                           <span>Zero Lateness</span>
+                        </div>
+                      )}
+                      {inc.incentiveType === 'attendance' && inc.requireNoUndertime && (
+                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                          <span>Zero Undertime</span>
                         </div>
                       )}
                     </td>
@@ -293,6 +303,14 @@ export const IncentiveManagement: React.FC = () => {
               </div>
 
               <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Incentive Type *</label>
+                <select value={formData.incentiveType} onChange={(e)=>setFormData({...formData,incentiveType:e.target.value as 'attendance'|'other'})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                  <option value="attendance">Attendance Incentive</option>
+                  <option value="other">Other Incentive</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
                   Incentive Amount (₱) *
                 </label>
@@ -336,7 +354,7 @@ export const IncentiveManagement: React.FC = () => {
                   <span>Must have zero absences on all scheduled duty days</span>
                 </label>
 
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                {formData.incentiveType === 'attendance' && <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formData.requireNoLate}
@@ -344,7 +362,12 @@ export const IncentiveManagement: React.FC = () => {
                     className="w-4 h-4 rounded text-blue-600 bg-slate-950 border-slate-700"
                   />
                   <span>Must have zero lateness across the entire cut-off</span>
-                </label>
+                </label>}
+
+                {formData.incentiveType === 'attendance' && <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={formData.requireNoUndertime} onChange={(e)=>setFormData({...formData,requireNoUndertime:e.target.checked})} className="w-4 h-4 rounded text-blue-600 bg-slate-950 border-slate-700"/>
+                  <span>Must have no undertime on any required duty day</span>
+                </label>}
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">

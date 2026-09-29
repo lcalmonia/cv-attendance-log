@@ -13,6 +13,34 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
 const norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
 const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 const normMobile = (v: unknown) => { const d = digits(v); return d.length >= 10 ? d.slice(-10) : d; };
+function minutesBetweenTimes(start: unknown, end: unknown) {
+  if (!start || !end) return 0;
+  const s = String(start), e = String(end);
+  const asDate = (v: string) => {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const sd = asDate(s), ed = asDate(e);
+  if (sd && ed) return Math.max(0, Math.round((ed.getTime() - sd.getTime()) / 60000));
+  const parts = (v: string) => {
+    const m = v.match(/(\\d{1,2}):(\\d{2})/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const sm = parts(s), em = parts(e);
+  if (sm == null || em == null) return 0;
+  return Math.max(0, (em - sm + 1440) % 1440);
+}
+function scheduleBreakMinutes(s: any) {
+  return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
+}
+function normalizedWorkMinutes(a: any, s: any) {
+  const elapsed = minutesBetweenTimes(a?.time_in, a?.time_out);
+  const requiredBreak = scheduleBreakMinutes(s);
+  const actualBreak = a?.break_out && a?.break_in ? minutesBetweenTimes(a.break_out, a.break_in) : 0;
+  const effectiveBreak = Math.max(requiredBreak, actualBreak);
+  return Math.max(0, elapsed - effectiveBreak);
+}
+
 const hashToken = (v: string) => createHash('sha256').update(v).digest('hex');
 function hashPassword(password: string, salt = randomBytes(16).toString('hex')) {
   if (password.length < 6) throw new Error('Password must be at least 6 characters.');
@@ -84,10 +112,11 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
-      const worked=Number(a.total_work_minutes||0), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
+      const worked=normalizedWorkMinutes(a,s), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
-    attendanceDays.push({date:dateKey,status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(Number(a?.total_work_minutes||0)/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
+    attendanceDays.push({date:dateKey,status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
@@ -95,13 +124,22 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
   for(const i of incR.rows){
-    let q=duty.length>0 && daysWorked>0;
-    for(const s of duty){
-      const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
-      if(i.require_no_absence&&!a?.time_in) q=false;
-      if(i.require_no_late&&Number(a?.late_minutes||0)>0) q=false;
+    let q=duty.length>0 && daysWorked===duty.length;
+    if(i.incentive_type==='attendance' || !i.incentive_type){
+      for(const s of duty){
+        const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
+        const present=!!a?.time_in;
+        if(i.require_no_absence&&!present) q=false;
+        if(i.require_no_late&&Number(a?.late_minutes||0)>0) q=false;
+        if(i.require_no_undertime){
+          const scheduledMinutes=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s));
+          const actualMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
+          if(!present || !a?.time_out || actualMinutes<scheduledMinutes) q=false;
+        }
+        if(present && a?.break_out && a?.break_in && minutesBetweenTimes(a.break_out,a.break_in)>scheduleBreakMinutes(s)) q=false;
+      }
     }
-    if(q) incentives.push({name:i.name,amount:Number(i.amount)});
+    if(q) incentives.push({name:i.name,amount:Number(i.amount),type:i.incentive_type||'attendance'});
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
@@ -344,9 +382,9 @@ async function handle(request: Request) {
     if(path==='admin/deductions/employee'&&m==='GET'&&isAdmin(u)){const id=new URL(request.url).searchParams.get('employeeId');const r=id?await db.sql`SELECT d.*,e.full_name AS "employeeName" FROM employee_deductions d JOIN employees e ON e.id=d.employee_id WHERE d.employee_id=${id} ORDER BY d.id DESC`:await db.sql`SELECT d.*,e.full_name AS "employeeName" FROM employee_deductions d JOIN employees e ON e.id=d.employee_id ORDER BY d.id DESC`;return json(r.rows.map((x:any)=>({id:x.id,employeeId:x.employee_id,deductionTypeId:x.deduction_type_id||undefined,deductionName:x.deduction_name,amount:Number(x.amount),payrollPeriodId:x.payroll_period_id||undefined,recurring:Boolean(x.recurring),status:x.status,employeeName:x.employeeName})));}
     if(path==='admin/deductions/employee'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.employeeId||!b.deductionName||b.amount===undefined)return json({error:'Employee, deduction name, and amount are required.'},400);if(b.recurring===false&&!b.payrollPeriodId)return json({error:'Payroll period is required for one-time deductions.'},400);const id=`empded_${randomBytes(8).toString('hex')}`;await db.sql`INSERT INTO employee_deductions(id,employee_id,deduction_type_id,deduction_name,amount,payroll_period_id,recurring,status) VALUES(${id},${b.employeeId},${b.deductionTypeId||null},${b.deductionName},${Number(b.amount)},${b.recurring?null:b.payrollPeriodId},${Boolean(b.recurring)},${b.status||'active'})`;return json({id,employeeId:b.employeeId,deductionTypeId:b.deductionTypeId,deductionName:b.deductionName,amount:Number(b.amount),payrollPeriodId:b.recurring?undefined:b.payrollPeriodId,recurring:Boolean(b.recurring),status:b.status||'active'});}
     if(path.startsWith('admin/deductions/employee/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM employee_deductions WHERE id=${path.split('/')[3]}`;return json({success:true});}
-    if(path==='admin/incentives'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT id,business_id AS "businessId",name,description,amount,require_no_late AS "requireNoLate",require_no_absence AS "requireNoAbsence",status,effective_date AS "effectiveDate" FROM incentive_programs ORDER BY name`;return json(r.rows.map((x:any)=>({...x,amount:Number(x.amount),businessName:x.businessId==='all'?'All Businesses':''}))); }
-    if(path==='admin/incentives'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.businessId||!b.name||b.amount===undefined)return json({error:'Business, name, and amount are required.'},400);const id=`inc_${randomBytes(8).toString('hex')}`;await db.sql`INSERT INTO incentive_programs(id,business_id,name,description,amount,require_no_late,require_no_absence,status,effective_date) VALUES(${id},${b.businessId},${b.name},${b.description||''},${Number(b.amount)},${b.requireNoLate!==false},${b.requireNoAbsence!==false},${b.status||'active'},${b.effectiveDate||phNow().date})`;return json({id,businessId:b.businessId,name:b.name,description:b.description||'',amount:Number(b.amount),requireNoLate:b.requireNoLate!==false,requireNoAbsence:b.requireNoAbsence!==false,status:b.status||'active',effectiveDate:b.effectiveDate||phNow().date});}
-    if(path.startsWith('admin/incentives/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[2],i=(await db.sql`SELECT * FROM incentive_programs WHERE id=${id}`).rows[0];if(!i)return json({error:'Incentive not found.'},404);const b=await request.json(),n={name:b.name??i.name,description:b.description??i.description,amount:b.amount!==undefined?Number(b.amount):Number(i.amount),requireNoLate:b.requireNoLate!==undefined?Boolean(b.requireNoLate):i.require_no_late,requireNoAbsence:b.requireNoAbsence!==undefined?Boolean(b.requireNoAbsence):i.require_no_absence,status:b.status??i.status,effectiveDate:b.effectiveDate??String(i.effective_date).slice(0,10)};await db.sql`UPDATE incentive_programs SET name=${n.name},description=${n.description},amount=${n.amount},require_no_late=${n.requireNoLate},require_no_absence=${n.requireNoAbsence},status=${n.status},effective_date=${n.effectiveDate} WHERE id=${id}`;return json({id,businessId:i.business_id,...n});}
+    if(path==='admin/incentives'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT i.id,i.business_id AS "businessId",i.name,i.description,i.amount,i.incentive_type AS "incentiveType",i.require_no_late AS "requireNoLate",i.require_no_absence AS "requireNoAbsence",i.require_no_undertime AS "requireNoUndertime",i.status,i.effective_date AS "effectiveDate",CASE WHEN i.business_id='all' THEN 'All Businesses' ELSE COALESCE(b.name,'') END AS "businessName" FROM incentive_programs i LEFT JOIN businesses b ON b.id=i.business_id ORDER BY i.name`;return json(r.rows.map((x:any)=>({...x,amount:Number(x.amount)}))); }
+    if(path==='admin/incentives'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.businessId||!b.name||b.amount===undefined)return json({error:'Business, name, and amount are required.'},400);const id=`inc_${randomBytes(8).toString('hex')}`,type=b.incentiveType||'attendance';if(!['attendance','other'].includes(type))return json({error:'Invalid incentive type.'},400);await db.sql`INSERT INTO incentive_programs(id,business_id,name,description,amount,incentive_type,require_no_late,require_no_absence,require_no_undertime,status,effective_date) VALUES(${id},${b.businessId},${b.name},${b.description||''},${Number(b.amount)},${type},${b.requireNoLate!==false},${b.requireNoAbsence!==false},${b.requireNoUndertime===true},${b.status||'active'},${b.effectiveDate||phNow().date})`;return json({id,businessId:b.businessId,name:b.name,description:b.description||'',amount:Number(b.amount),incentiveType:type,requireNoLate:b.requireNoLate!==false,requireNoAbsence:b.requireNoAbsence!==false,requireNoUndertime:b.requireNoUndertime===true,status:b.status||'active',effectiveDate:b.effectiveDate||phNow().date});}
+    if(path.startsWith('admin/incentives/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[2],i=(await db.sql`SELECT * FROM incentive_programs WHERE id=${id}`).rows[0];if(!i)return json({error:'Incentive not found.'},404);const b=await request.json(),n={name:b.name??i.name,description:b.description??i.description,amount:b.amount!==undefined?Number(b.amount):Number(i.amount),incentiveType:b.incentiveType??i.incentive_type,requireNoLate:b.requireNoLate!==undefined?Boolean(b.requireNoLate):i.require_no_late,requireNoAbsence:b.requireNoAbsence!==undefined?Boolean(b.requireNoAbsence):i.require_no_absence,requireNoUndertime:b.requireNoUndertime!==undefined?Boolean(b.requireNoUndertime):Boolean(i.require_no_undertime),status:b.status??i.status,effectiveDate:b.effectiveDate??String(i.effective_date).slice(0,10)};if(!['attendance','other'].includes(n.incentiveType))return json({error:'Invalid incentive type.'},400);await db.sql`UPDATE incentive_programs SET name=${n.name},description=${n.description},amount=${n.amount},incentive_type=${n.incentiveType},require_no_late=${n.requireNoLate},require_no_absence=${n.requireNoAbsence},require_no_undertime=${n.requireNoUndertime},status=${n.status},effective_date=${n.effectiveDate} WHERE id=${id}`;return json({id,businessId:i.business_id,...n});}
     if(path.startsWith('admin/incentives/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM incentive_programs WHERE id=${path.split('/')[2]}`;return json({success:true});}
     if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){const id=path.split('/')[2],p=await periodById(id);if(!p)return json({error:'Payroll period not found.'},404);const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;const records=[];for(const e of es)records.push(await calculatePayroll(e.id,id));return json({period:{id:p.id,name:p.name,startDate:String(p.start_date).slice(0,10),endDate:String(p.end_date).slice(0,10),payoutDate:String(p.payout_date).slice(0,10),status:p.status},records});}
     if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);if(!(await periodById(b.periodId)))return json({error:'Payroll period not found.'},404);await db.sql`UPDATE payroll_periods SET status=${b.status} WHERE id=${b.periodId}`;return json({success:true,status:b.status});}

@@ -112,7 +112,9 @@ export interface IncentiveProgram {
   name: string;
   description: string;
   amount: number;
+  incentiveType: 'attendance' | 'other';
   requireNoLate: boolean;
+  requireNoUndertime: boolean;
   requireNoAbsence: boolean;
   status: AccountStatus;
   effectiveDate: string;

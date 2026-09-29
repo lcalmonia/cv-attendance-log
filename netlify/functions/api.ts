@@ -599,11 +599,11 @@ async function handle(request: Request) {
         args.push(biz);
       }
       if(date){
-        sql+=` AND a.date::date=${args.length+1}::date`;
+        sql+=` AND a.date::date=$${args.length+1}::date`;
         args.push(date);
       }
       if(selectedPeriod){
-        sql+=` AND a.date::date BETWEEN ${args.length+1}::date AND ${args.length+2}::date`;
+        sql+=` AND a.date::date BETWEEN $${args.length+1}::date AND $${args.length+2}::date`;
         args.push(dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date));
       }
 

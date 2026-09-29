@@ -112,10 +112,11 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
-      const worked=Number(a.total_work_minutes||0), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
+      const worked=normalizedWorkMinutes(a,s), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
-    attendanceDays.push({date:dateKey,status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(Number(a?.total_work_minutes||0)/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
+    attendanceDays.push({date:dateKey,status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
@@ -131,10 +132,11 @@ async function calculatePayroll(employeeId:string, periodId:string) {
         if(i.require_no_absence&&!present) q=false;
         if(i.require_no_late&&Number(a?.late_minutes||0)>0) q=false;
         if(i.require_no_undertime){
-          const scheduledMinutes=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-(s.break_out&&s.break_in?Math.max(0,diffMinutes(s.break_out,s.break_in)):0));
-          const actualMinutes=Number(a?.total_work_minutes||0);
+          const scheduledMinutes=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s));
+          const actualMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
           if(!present || !a?.time_out || actualMinutes<scheduledMinutes) q=false;
         }
+        if(present && a?.break_out && a?.break_in && minutesBetweenTimes(a.break_out,a.break_in)>scheduleBreakMinutes(s)) q=false;
       }
     }
     if(q) incentives.push({name:i.name,amount:Number(i.amount),type:i.incentive_type||'attendance'});

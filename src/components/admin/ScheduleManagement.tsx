@@ -23,6 +23,8 @@ export const ScheduleManagement: React.FC = () => {
     notes: 'Regular Duty Shift',
   });
   const [busy, setBusy] = useState(false);
+  const [nextModalOpen, setNextModalOpen] = useState(false);
+  const [nextCutoff, setNextCutoff] = useState({ name: '', startDate: '', endDate: '', payoutDate: '' });
 
   // Period Modal
   const [periodModalOpen, setPeriodModalOpen] = useState(false);
@@ -144,6 +146,18 @@ export const ScheduleManagement: React.FC = () => {
     }
   };
 
+
+  const handleCreateNextCutoff = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!selectedPeriodId || !nextCutoff.startDate || !nextCutoff.endDate) return;
+    setBusy(true); try {
+      const res = await api.admin.createNextCutoffSchedule({ currentPeriodId: selectedPeriodId, ...nextCutoff });
+      setPeriods([res.period, ...periods.filter(p => p.id !== res.period.id)]);
+      setSelectedPeriodId(res.period.id); setNextModalOpen(false);
+      alert(`Next cut-off created and ${res.copiedSchedules} schedule entries copied.`);
+    } catch (err:any) { alert(err.message || 'Failed to create next cut-off schedule.'); }
+    finally { setBusy(false); }
+  };
+
   const currentPeriod = periods.find((p) => p.id === selectedPeriodId);
   const currentEmployee = employees.find((e) => e.id === selectedEmployeeId);
 
@@ -173,6 +187,20 @@ export const ScheduleManagement: React.FC = () => {
           >
             <CalendarDays className="w-4 h-4 text-purple-400" />
             <span>New Cut-Off Period</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const base = currentPeriod ? new Date(currentPeriod.endDate + 'T00:00:00Z') : new Date();
+              const start = new Date(base); start.setUTCDate(start.getUTCDate() + 1);
+              const end = new Date(start); end.setUTCDate(end.getUTCDate() + (currentPeriod ? Math.max(0, Math.round((new Date(currentPeriod.endDate+'T00:00:00Z').getTime()-new Date(currentPeriod.startDate+'T00:00:00Z').getTime())/86400000)) : 14));
+              const fmt=(d:Date)=>d.toISOString().slice(0,10);
+              setNextCutoff({name:'',startDate:fmt(start),endDate:fmt(end),payoutDate:fmt(end)}); setNextModalOpen(true);
+            }}
+            disabled={!selectedPeriodId}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-medium border border-purple-500/30 transition disabled:opacity-50"
+          >
+            <CalendarDays className="w-4 h-4" /><span>Create Schedule for Next Cut-Off</span>
           </button>
 
           <button
@@ -485,6 +513,8 @@ export const ScheduleManagement: React.FC = () => {
           </div>
         </div>
       )}
+
+      {nextModalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs"><div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-5"><div className="flex justify-between items-center mb-4"><h3 className="font-semibold text-white">Create Schedule for Next Cut-Off</h3><button onClick={()=>setNextModalOpen(false)}><X className="w-5 h-5 text-slate-400"/></button></div><p className="text-xs text-slate-400 mb-4">The current cut-off's employee schedules will be copied forward to the new date range.</p><form onSubmit={handleCreateNextCutoff} className="space-y-3"><input placeholder="Cut-off name (optional)" value={nextCutoff.name} onChange={e=>setNextCutoff({...nextCutoff,name:e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"/><div className="grid grid-cols-2 gap-3"><input required type="date" value={nextCutoff.startDate} onChange={e=>setNextCutoff({...nextCutoff,startDate:e.target.value})} className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"/><input required type="date" value={nextCutoff.endDate} onChange={e=>setNextCutoff({...nextCutoff,endDate:e.target.value})} className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"/></div><div><label className="block text-xs text-slate-400 mb-1">Payout Date</label><input required type="date" value={nextCutoff.payoutDate} onChange={e=>setNextCutoff({...nextCutoff,payoutDate:e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"/></div><div className="flex justify-end gap-2 pt-3 border-t border-slate-800"><button type="button" onClick={()=>setNextModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300">Cancel</button><button disabled={busy} className="px-4 py-2 rounded-lg bg-purple-600 text-white font-medium">{busy?'Creating…':'Create & Copy Schedules'}</button></div></form></div></div>}
 
       {/* New Period Modal */}
       {periodModalOpen && (

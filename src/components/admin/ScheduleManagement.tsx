@@ -163,8 +163,8 @@ export const ScheduleManagement: React.FC = () => {
               setPeriodFormData({
                 name: '',
                 startDate: new Date().toISOString().slice(0, 10),
-                endDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
-                payoutDate: new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10),
+                endDate: new Date(Date.now() + 14 * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }),
+                payoutDate: new Date(Date.now() + 20 * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }),
                 status: 'open',
               });
               setPeriodModalOpen(true);

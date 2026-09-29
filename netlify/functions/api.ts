@@ -574,7 +574,7 @@ async function handle(request: Request) {
         FROM schedules s
         LEFT JOIN payroll_periods sp ON sp.id=s.payroll_period_id
         WHERE s.employee_id=a.employee_id
-          AND s.date=a.date`;
+          AND s.date::date=a.date::date`;
       const args:any[]=[];
 
       if(selectedPeriod){
@@ -586,7 +586,7 @@ async function handle(request: Request) {
         ORDER BY
           CASE
             WHEN sp.start_date IS NOT NULL
-              AND a.date BETWEEN sp.start_date AND sp.end_date THEN 0
+              AND a.date::date BETWEEN sp.start_date::date AND sp.end_date::date THEN 0
             ELSE 1
           END,
           sp.start_date DESC NULLS LAST
@@ -599,11 +599,11 @@ async function handle(request: Request) {
         args.push(biz);
       }
       if(date){
-        sql+=` AND a.date=$${args.length+1}`;
+        sql+=` AND a.date::date=${args.length+1}::date`;
         args.push(date);
       }
       if(selectedPeriod){
-        sql+=` AND a.date BETWEEN $${args.length+1} AND $${args.length+2}`;
+        sql+=` AND a.date::date BETWEEN ${args.length+1}::date AND ${args.length+2}::date`;
         args.push(dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date));
       }
 

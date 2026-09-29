@@ -403,7 +403,8 @@ async function handle(request: Request) {
       return json({id,userId:e.user_id,employeeId:e.employee_id,...n});
     }
     if(path==='admin/periods'&&m==='GET'&&isAdmin(u)){
-      const r=await db.sql`SELECT id,name,start_date AS "startDate",end_date AS "endDate",payout_date AS "payoutDate",status FROM payroll_periods ORDER BY start_date DESC`; return json(r.rows.map((x:any)=>x));
+      const r=await db.sql`SELECT id,name,start_date AS "startDate",end_date AS "endDate",payout_date AS "payoutDate",status FROM payroll_periods ORDER BY start_date DESC`;
+      return json(r.rows.map((x:any)=>({...x,startDate:dateOnly(x.startDate),endDate:dateOnly(x.endDate),payoutDate:dateOnly(x.payoutDate)})));
     }
     if(path==='admin/periods'&&m==='POST'&&isAdmin(u)){
       const b=await request.json(); if(!dateOk(b.startDate)||!dateOk(b.endDate)||!dateOk(b.payoutDate)||b.endDate<b.startDate)return json({error:'Valid start date, end date, and payout date are required.'},400);

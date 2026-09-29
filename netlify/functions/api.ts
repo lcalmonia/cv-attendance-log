@@ -137,6 +137,7 @@ async function currentUser(request: Request) {
     JOIN auth_accounts aa ON aa.user_id=u.id AND aa.is_active=true
     LEFT JOIN employees e ON e.user_id=s.user_id
     WHERE s.token_hash=${hashToken(token)} AND s.expires_at>NOW()
+      AND (u.role='super_admin' OR e.status='active')
   `;
   return r.rows[0] || null;
 }
@@ -244,21 +245,26 @@ async function handle(request: Request) {
       if((await db.sql`SELECT 1 FROM users WHERE lower(employee_id)=lower(${b.employeeId}) LIMIT 1`).rows[0]) return json({error:'This Employee ID is already in use.'},400);
       if((await db.sql`SELECT 1 FROM auth_accounts WHERE login_id=${loginId} LIMIT 1`).rows[0]) return json({error:'This Employee ID is already in use for login.'},400);
       if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} LIMIT 1`).rows[0]) return json({error:'This mobile number is already in use.'},400);
-      await withTransaction(async (client) => {
-        await client.query(
-          'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-          [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','super_admin','active',false]
-        );
-        await client.query(
-          'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-          [userId,loginId,mobileLogin,passwordHash,false,true,now,now]
-        );
-      });
+      try{
+        await withTransaction(async (client) => {
+          await client.query(
+            'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+            [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','super_admin','active',false]
+          );
+          await client.query(
+            'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+            [userId,loginId,mobileLogin,passwordHash,false,true,now,now]
+          );
+        });
+      }catch(e:any){
+        if(e?.code==='23505')return json({error:'Initial administrator setup has already been completed or the login details are already in use.'},409);
+        throw e;
+      }
       return json({success:true});
     }
     if(path==='auth/login'&&m==='POST'){
       const b=await request.json(), login=norm(b.loginId), mobile=normMobile(b.loginId);
-      const r=await db.sql`SELECT a.*,u.employee_id,u.full_name,u.role,u.status FROM auth_accounts a JOIN users u ON u.id=a.user_id WHERE a.login_id=${login} OR (a.mobile_login IS NOT NULL AND a.mobile_login=${mobile}) LIMIT 1`;
+      const r=await db.sql`SELECT a.*,u.employee_id,u.full_name,u.role,u.status,e.status AS employee_status FROM auth_accounts a JOIN users u ON u.id=a.user_id LEFT JOIN employees e ON e.user_id=u.id WHERE (a.login_id=${login} OR (a.mobile_login IS NOT NULL AND a.mobile_login=${mobile})) AND (u.role='super_admin' OR e.status='active') LIMIT 1`;
       const a=r.rows[0];
       if(!a||!a.is_active||a.status!=='active'||!verifyPassword(String(b.password||''),a.password_hash)) return json({error:'Invalid credentials or inactive account.'},401);
       const token=randomBytes(32).toString('base64url');
@@ -324,20 +330,25 @@ async function handle(request: Request) {
       if((await db.sql`SELECT 1 FROM users WHERE lower(employee_id)=lower(${b.employeeId}) LIMIT 1`).rows[0])return json({error:'An account with this Employee ID already exists.'},400);
       if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} LIMIT 1`).rows[0])return json({error:'An account with this mobile number already exists.'},400);
       const emp={id:empId,userId,employeeId:b.employeeId,businessId:b.businessId,fullName:b.fullName,mobileNumber:b.mobileNumber||'',email:b.email||'',position:b.position||'Staff',employmentStatus:b.employmentStatus||'regular',dateHired:b.dateHired||phNow().date,dailyRate:Number(b.dailyRate||600),requiredHoursPerDay:Number(b.requiredHoursPerDay||8),status};
-      await withTransaction(async (client) => {
-        await client.query(
-          'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,business_id,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-          [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','employee',b.businessId,status,true]
-        );
-        await client.query(
-          'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-          [userId,loginId,mobileLogin,hashPassword(norm(b.employeeId)),true,status==='active',now,now]
-        );
-        await client.query(
-          'INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
-          [emp.id,emp.userId,emp.employeeId,emp.businessId,emp.fullName,emp.mobileNumber,emp.email,emp.position,emp.employmentStatus,emp.dateHired,emp.dailyRate,emp.requiredHoursPerDay,emp.status]
-        );
-      });
+      try{
+        await withTransaction(async (client) => {
+          await client.query(
+            'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,business_id,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+            [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','employee',b.businessId,status,true]
+          );
+          await client.query(
+            'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+            [userId,loginId,mobileLogin,hashPassword(norm(b.employeeId)),true,status==='active',now,now]
+          );
+          await client.query(
+            'INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+            [emp.id,emp.userId,emp.employeeId,emp.businessId,emp.fullName,emp.mobileNumber,emp.email,emp.position,emp.employmentStatus,emp.dateHired,emp.dailyRate,emp.requiredHoursPerDay,emp.status]
+          );
+        });
+      }catch(e:any){
+        if(e?.code==='23505')return json({error:'Employee ID or mobile number is already in use.'},409);
+        throw e;
+      }
       return json(emp);
     }
     if(path.startsWith('admin/employees/')&&path.endsWith('/reset-password')&&m==='POST'&&isAdmin(u)){

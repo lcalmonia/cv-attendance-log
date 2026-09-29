@@ -102,6 +102,8 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                   </span>
                 </div>
 
+                {record.nightDifferentialPay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Night Differential ({(record.nightDifferentialHours||0).toFixed(1)} hrs)</span><span className="font-mono font-medium">+₱{record.nightDifferentialPay.toLocaleString()}</span></div> : null}
+                {record.holidayOvertimePay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Holiday Overtime</span><span className="font-mono font-medium">+₱{record.holidayOvertimePay.toLocaleString()}</span></div> : null}
                 {record.breakdown.incentives.map((inc, i) => (
                   <div key={i} className="flex justify-between text-emerald-400 print:text-emerald-700">
                     <span>{inc.name}</span>

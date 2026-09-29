@@ -11,6 +11,7 @@ import {
   PayrollRecord,
   PayrollStatus,
   AttendanceAction,
+  PayrollSettings,
 } from '../types';
 
 export function getAuthToken(): null { return null; }
@@ -177,6 +178,14 @@ export const api = {
     // Payroll
     getPayroll: (periodId: string) =>
       request<{ period: PayrollPeriod; records: PayrollRecord[] }>(`/api/admin/payroll/${periodId}`),
+    getSettings: (businessId?: string) => request<PayrollSettings>(`/api/admin/settings${businessId ? `?businessId=${encodeURIComponent(businessId)}` : ''}`),
+    updateSettings: (data: { businessId: string; nightDifferentialHourlyRate: number }) => request<{ success: boolean }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+    createHoliday: (data: any) => request<{ success: boolean; id: string }>('/api/admin/holidays', { method: 'POST', body: JSON.stringify(data) }),
+    updateHoliday: (id: string, data: any) => request<{ success: boolean }>(`/api/admin/holidays/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteHoliday: (id: string) => request<{ success: boolean }>(`/api/admin/holidays/${id}`, { method: 'DELETE' }),
+    addAttendance: (data: any) => request<{ success: boolean; id: string }>('/api/admin/attendance', { method: 'POST', body: JSON.stringify(data) }),
+    updateAttendance: (id: string, data: any) => request<{ success: boolean }>(`/api/admin/attendance/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    createNextCutoffSchedule: (data: any) => request<any>('/api/admin/schedules/create-next-cutoff', { method: 'POST', body: JSON.stringify(data) }),
     updatePayrollStatus: (periodId: string, status: PayrollStatus) =>
       request<{ success: boolean; status: PayrollStatus }>('/api/admin/payroll/status', {
         method: 'POST',

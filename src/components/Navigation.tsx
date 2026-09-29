@@ -9,6 +9,7 @@ import {
   DollarSign,
   FileText,
   Award,
+  Settings,
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -28,6 +29,7 @@ export const Navigation: React.FC<NavigationProps> = ({ role, activeTab, setActi
     { id: 'deductions', label: 'Deductions', icon: CheckCircle2 },
     { id: 'incentives', label: 'Incentives', icon: Award },
     { id: 'payroll', label: 'Payroll', icon: DollarSign },
+    { id: 'settings', label: 'Payroll Settings', icon: Settings },
   ];
 
   const employeeTabs = [

@@ -13,7 +13,7 @@ import {
   AttendanceAction,
 } from '../types';
 
-export function getAuthToken(): boolean { return true; }
+export function getAuthToken(): null { return null; }
 export function setAuthToken(_token: string) {}
 export function clearAuthToken() {}
 
@@ -55,7 +55,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ loginId, password }),
       });
-      setAuthToken(res.token);
+      // Authentication is persisted by the HttpOnly session cookie set by the server.
       return res;
     },
     session: () =>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Lock, UserRound, AlertCircle, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Lock, UserRound, AlertCircle, ArrowRight } from 'lucide-react';
 import { api } from '../services/api';
 
 interface LoginScreenProps {
@@ -16,8 +16,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => 
   // Setup form state
   const [setupData, setSetupData] = useState({
     fullName: '',
-    employeeId: 'CVG-ADM-001',
-    email: 'admin@cvgroup.com',
+    employeeId: '',
+    email: '',
     mobileNumber: '',
     password: '',
     confirmPassword: '',
@@ -75,12 +75,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => 
     }
   };
 
-  const setDemoLogin = (user: string, pass: string) => {
-    setLoginId(user);
-    setPassword(pass);
-    setError('');
-  };
-
   if (mode === 'loading') {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center font-sans">
@@ -121,7 +115,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => 
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Carlos Valderama"
+                  placeholder="Enter full name"
                   value={setupData.fullName}
                   onChange={(e) => setSetupData({ ...setupData, fullName: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -185,7 +179,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => 
             <div className="mb-5 pb-3 border-b border-slate-800">
               <h2 className="text-base font-semibold text-white">Sign In to Your Account</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Enter your Employee ID and password to access the portal.
+                Enter your Employee ID or mobile number and password to access the portal.
               </p>
             </div>
 
@@ -199,7 +193,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => 
                   <input
                     type="text"
                     required
-                    placeholder="e.g. CVG-ADM-001 or ILK-EMP-101"
+                    placeholder="Enter Employee ID or mobile number"
                     value={loginId}
                     onChange={(e) => setLoginId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"

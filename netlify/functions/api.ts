@@ -354,8 +354,12 @@ async function handle(request: Request) {
     if(path.startsWith('admin/employees/')&&path.endsWith('/reset-password')&&m==='POST'&&isAdmin(u)){
       const id=path.split('/')[2], e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404);
       if(String(e.employee_id).trim().length<6)return json({error:'This employee ID is shorter than the required 6-character minimum and cannot be used as a temporary password.'},400);
-      await db.sql`UPDATE auth_accounts SET password_hash=${hashPassword(norm(e.employee_id))},must_change_password=true,updated_at=NOW() WHERE user_id=${e.user_id}`;
-      await db.sql`UPDATE users SET must_change_password=true WHERE id=${e.user_id}`; return json({success:true,message:`Password reset to temporary: ${e.employee_id}`});
+      const resetHash=hashPassword(norm(e.employee_id));
+      await withTransaction(async (client) => {
+        await client.query('UPDATE auth_accounts SET password_hash=$1,must_change_password=true,updated_at=NOW() WHERE user_id=$2',[resetHash,e.user_id]);
+        await client.query('UPDATE users SET must_change_password=true WHERE id=$1',[e.user_id]);
+      });
+      return json({success:true,message:`Password reset to temporary: ${e.employee_id}`});
     }
     if(path.startsWith('admin/employees/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2]; const e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404); const b=await request.json();

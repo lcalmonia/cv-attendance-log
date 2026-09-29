@@ -37,6 +37,31 @@ function minutesBetweenTimes(start: unknown, end: unknown) {
   if (sm == null || em == null) return 0;
   return Math.max(0, (em - sm + 1440) % 1440);
 }
+function parseHm(v: unknown) {
+  const m = String(v ?? '').match(/^(\\d{1,2}):(\\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+}
+function diffMinutes(start: unknown, end: unknown) {
+  const s = parseHm(start), e = parseHm(end);
+  return Math.max(0, (e - s + 1440) % 1440);
+}
+function nightDifferentialMinutes(start: string, end: string) {
+  const s = new Date(start), e = new Date(end);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) return 0;
+  let total = 0;
+  const cursor = new Date(s);
+  while (cursor < e) {
+    const next = new Date(cursor);
+    next.setMinutes(next.getMinutes() + 1);
+    const hour = cursor.getHours();
+    if (hour >= 22 || hour < 6) total++;
+    cursor.setTime(next.getTime());
+  }
+  return total;
+}
+function holidayTypeOk(v: unknown) {
+  return ['regular','special_non_working','special_working'].includes(String(v ?? ''));
+}
 function scheduleBreakMinutes(s: any) {
   return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
 }
@@ -87,12 +112,13 @@ function timeOk(v: unknown) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v |
 async function currentUser(request: Request) {
   const token = cookies(request).cvlog_session;
   if (!token) return null;
-  return (await db.sql`
+  const r = await db.sql`
     SELECT s.user_id AS "userId", s.role, s.employee_id AS "employeeId",
            e.id AS "employeeDbId", e.business_id AS "businessId"
     FROM sessions s LEFT JOIN employees e ON e.user_id=s.user_id
     WHERE s.token_hash=${hashToken(token)} AND s.expires_at>NOW()
-  `).then(r => r.rows[0] || null);
+  `;
+  return r.rows[0] || null;
 }
 const isAdmin=(u:any)=>u?.role==='super_admin';
 const isEmployee=(u:any)=>u?.role==='employee';
@@ -453,8 +479,8 @@ async function handle(request: Request) {
       return json({success:true,attendance:{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:String(a.date).slice(0,10),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status}});
     }
     if(path==='employee/schedules'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId');const r=id?await db.sql`SELECT * FROM schedules WHERE employee_id=${u.employeeDbId} AND payroll_period_id=${id} ORDER BY date`:await db.sql`SELECT * FROM schedules WHERE employee_id=${u.employeeDbId} ORDER BY date DESC`;return json(r.rows.map((s:any)=>({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:String(s.date).slice(0,10),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes})));}
-    if(path==='employee/attendance'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId'),p=id?await periodById(id):await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`.then(r=>r.rows[0]);if(!p)return json({period:null,attendance:[]});const r=await db.sql`SELECT a.*,s.required_time_in,s.required_time_out,s.is_working_day FROM attendance a LEFT JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=${p.id} WHERE a.employee_id=${u.employeeDbId} AND a.date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY a.date DESC`;return json({period:{id:p.id,name:p.name,startDate:String(p.start_date).slice(0,10),endDate:String(p.end_date).slice(0,10),payoutDate:String(p.payout_date).slice(0,10),status:p.status},attendance:r.rows.map((a:any)=>({id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:String(a.date).slice(0,10),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status,scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'}))});}
-    if(path==='employee/payroll'&&m==='GET'&&isEmployee(u)){const id=new URL(request.url).searchParams.get('periodId'),p=id?await periodById(id):await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`.then(r=>r.rows[0]);if(!p)return json({error:'No active payroll period found.'},404);return json(await calculatePayroll(u.employeeDbId,p.id));}
+    if(path==='employee/attendance'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId'),p=id?await periodById(id):(await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`).rows[0];if(!p)return json({period:null,attendance:[]});const r=await db.sql`SELECT a.*,s.required_time_in,s.required_time_out,s.is_working_day FROM attendance a LEFT JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=${p.id} WHERE a.employee_id=${u.employeeDbId} AND a.date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY a.date DESC`;return json({period:{id:p.id,name:p.name,startDate:String(p.start_date).slice(0,10),endDate:String(p.end_date).slice(0,10),payoutDate:String(p.payout_date).slice(0,10),status:p.status},attendance:r.rows.map((a:any)=>({id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:String(a.date).slice(0,10),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status,scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'}))});}
+    if(path==='employee/payroll'&&m==='GET'&&isEmployee(u)){const id=new URL(request.url).searchParams.get('periodId'),p=id?await periodById(id):(await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`).rows[0];if(!p)return json({error:'No active payroll period found.'},404);return json(await calculatePayroll(u.employeeDbId,p.id));}
     if(path==='employee/payroll/approve'&&m==='POST'&&isEmployee(u)){const b=await request.json(),p=await periodById(b.periodId);if(!p)return json({error:'Payroll period not found.'},404);if(p.status!=='for_approval')return json({error:'Payroll is not currently awaiting employee approval.'},400);const now=new Date().toISOString();await db.sql`INSERT INTO payroll_approvals(payroll_period_id,employee_id,approved_at) VALUES(${b.periodId},${u.employeeDbId},${now}) ON CONFLICT(payroll_period_id,employee_id) DO UPDATE SET approved_at=EXCLUDED.approved_at`;return json({success:true,approvedAt:now});}
     return json({error:'Not found'},404);
   } catch(e:any) {

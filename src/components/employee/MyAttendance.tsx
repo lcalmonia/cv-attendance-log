@@ -92,6 +92,12 @@ export const MyAttendance: React.FC = () => {
             <XCircle className="w-3 h-3" /> Absent
           </span>
         );
+      case 'invalid':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+            <AlertCircle className="w-3 h-3" /> Invalid
+          </span>
+        );
       case 'incomplete':
       default:
         return (

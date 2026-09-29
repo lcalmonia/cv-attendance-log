@@ -247,7 +247,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
       q=duty.length>0;
       for(const s of duty){
         const a=attendance.find((x:any)=>dateOnly(x.date)===dateOnly(s.date));
-        const present=!!a?.time_in;
+        const present=!!a?.time_in && !isInvalidShortDuty(a,s);
         if(i.require_no_absence&&!present) q=false;
         if(i.require_no_late&&Number(a?.late_minutes||0)>0) q=false;
         if(i.require_no_undertime){

@@ -2,7 +2,13 @@ import { getDatabase } from '@netlify/database';
 import type { Config } from '@netlify/functions';
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 
-const db = getDatabase();
+const database = getDatabase();
+const db = {
+  sql: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const rows = await database.sql(strings, ...values as any[]);
+    return { rows: Array.isArray(rows) ? rows : (rows as any)?.rows || [] };
+  },
+};
 const MAX_AGE = 7 * 24 * 60 * 60;
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {

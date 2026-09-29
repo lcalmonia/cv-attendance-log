@@ -46,7 +46,6 @@ export const api = {
     status: () => request<{ hasAccounts: boolean }>('/api/auth/status'),
     login: async (loginId: string, password: string) => {
       const res = await request<{
-        token: string;
         userId: string;
         role: 'super_admin' | 'employee';
         fullName: string;

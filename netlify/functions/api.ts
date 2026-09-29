@@ -48,7 +48,6 @@ function phNow() {
 }
 function dateOk(v: unknown) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')); }
 function timeOk(v: unknown) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')); }
-function row(obj: any) { return obj; }
 
 async function currentUser(request: Request) {
   const token = cookies(request).cvlog_session;

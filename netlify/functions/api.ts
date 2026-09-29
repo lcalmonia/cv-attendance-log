@@ -337,7 +337,7 @@ async function handle(request: Request) {
             [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','employee',b.businessId,status,true]
           );
           await client.query(
-            'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+            'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
             [userId,loginId,mobileLogin,hashPassword(norm(b.employeeId)),true,status==='active',now,now]
           );
           await client.query(

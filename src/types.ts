@@ -135,6 +135,8 @@ export interface PayrollRecord {
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;
+  lateDeduction: number;
+  baseDutyPay: number;
   basicPay: number;
   incentivePay: number;
   employeeDeductionsTotal: number;

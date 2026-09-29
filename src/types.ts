@@ -82,6 +82,9 @@ export interface AttendanceRecord {
   timeOut?: string; // ISO string
   lateMinutes: number;
   totalWorkMinutes: number;
+  undertimeMinutes?: number;
+  overbreakMinutes?: number;
+  varianceMinutes?: number;
   status: AttendanceStatus;
 }
 

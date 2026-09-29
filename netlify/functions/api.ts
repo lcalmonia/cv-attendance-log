@@ -396,23 +396,35 @@ async function handle(request: Request) {
       if(!cur)return json({error:'Current payroll period not found.'},404);
       if(!dateOk(b.nextStartDate)||!dateOk(b.nextEndDate)||b.nextEndDate<b.nextStartDate)return json({error:'Valid next cut-off start/end dates are required.'},400);
       const payout=dateOk(b.nextPayoutDate)?b.nextPayoutDate:b.nextEndDate;
-      let next=(await db.sql`SELECT * FROM payroll_periods WHERE start_date=${b.nextStartDate} AND end_date=${b.nextEndDate} LIMIT 1`).rows[0];
-      if(!next){
-        const id=`period_${randomBytes(8).toString('hex')}`;
-        await db.sql`INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES(${id},${b.name||`Next Cut-Off ${b.nextStartDate} to ${b.nextEndDate}`},${b.nextStartDate},${b.nextEndDate},${payout},'open')`;
-        next=(await periodById(id));
-      }
-      const curStart=new Date(String(cur.start_date).slice(0,10)+'T00:00:00Z'), nextStart=new Date(String(next.start_date).slice(0,10)+'T00:00:00Z');
       const source=(await db.sql`SELECT * FROM schedules WHERE payroll_period_id=${cur.id} ORDER BY date`).rows;
+      let next=(await db.sql`SELECT * FROM payroll_periods WHERE start_date=${b.nextStartDate} AND end_date=${b.nextEndDate} LIMIT 1`).rows[0];
       let copied=0;
-      for(const s of source){
-        const d=new Date(String(s.date).slice(0,10)+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+Math.round((nextStart.getTime()-curStart.getTime())/86400000));
-        const date=d.toISOString().slice(0,10);
-        if(date<String(next.start_date).slice(0,10)||date>String(next.end_date).slice(0,10))continue;
-        const id=`sched_${randomBytes(8).toString('hex')}`;
-        await db.sql`INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES(${id},${s.employee_id},${next.id},${date},${s.required_time_in},${s.required_time_out},${s.break_out},${s.break_in},${s.is_working_day},${s.notes}) ON CONFLICT(employee_id,payroll_period_id,date) DO NOTHING`;
-        copied++;
-      }
+      await withTransaction(async (client) => {
+        if(!next){
+          const id=`period_${randomBytes(8).toString('hex')}`;
+          await client.query(
+            'INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES($1,$2,$3,$4,$5,$6)',
+            [id,b.name||`Next Cut-Off ${b.nextStartDate} to ${b.nextEndDate}`,b.nextStartDate,b.nextEndDate,payout,'open']
+          );
+          const nr=await client.query('SELECT * FROM payroll_periods WHERE id=$1',[id]);
+          next=nr.rows[0];
+        }
+        const curStart=new Date(String(cur.start_date).slice(0,10)+'T00:00:00Z');
+        const nextStart=new Date(String(next.start_date).slice(0,10)+'T00:00:00Z');
+        const shiftDays=Math.round((nextStart.getTime()-curStart.getTime())/86400000);
+        for(const s of source){
+          const d=new Date(String(s.date).slice(0,10)+'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate()+shiftDays);
+          const date=d.toISOString().slice(0,10);
+          if(date<String(next.start_date).slice(0,10)||date>String(next.end_date).slice(0,10))continue;
+          const id=`sched_${randomBytes(8).toString('hex')}`;
+          const ins=await client.query(
+            'INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(employee_id,payroll_period_id,date) DO NOTHING',
+            [id,s.employee_id,next.id,date,s.required_time_in,s.required_time_out,s.break_out,s.break_in,s.is_working_day,s.notes]
+          );
+          copied+=ins.rowCount||0;
+        }
+      });
       return json({success:true,period:{id:next.id,name:next.name,startDate:String(next.start_date).slice(0,10),endDate:String(next.end_date).slice(0,10),payoutDate:String(next.payout_date).slice(0,10),status:next.status},copiedSchedules:copied});
     }
     if(path==='admin/schedules'&&m==='POST'&&isAdmin(u)){

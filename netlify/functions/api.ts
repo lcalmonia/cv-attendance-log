@@ -264,9 +264,9 @@ async function handle(request: Request) {
     }
     if(path==='auth/login'&&m==='POST'){
       const b=await request.json(), login=norm(b.loginId), mobile=normMobile(b.loginId);
-      const r=await db.sql`SELECT a.*,u.employee_id,u.full_name,u.role,u.status,e.status AS employee_status FROM auth_accounts a JOIN users u ON u.id=a.user_id LEFT JOIN employees e ON e.user_id=u.id WHERE (a.login_id=${login} OR (a.mobile_login IS NOT NULL AND a.mobile_login=${mobile})) AND (u.role='super_admin' OR e.status='active') LIMIT 1`;
+      const r=await db.sql`SELECT a.*,u.employee_id,u.full_name,u.role,u.status AS user_status,e.status AS employee_status FROM auth_accounts a JOIN users u ON u.id=a.user_id LEFT JOIN employees e ON e.user_id=u.id WHERE (a.login_id=${login} OR (a.mobile_login IS NOT NULL AND a.mobile_login=${mobile})) AND (u.role='super_admin' OR e.status='active') LIMIT 1`;
       const a=r.rows[0];
-      if(!a||!a.is_active||a.status!=='active'||!verifyPassword(String(b.password||''),a.password_hash)) return json({error:'Invalid credentials or inactive account.'},401);
+      if(!a||!a.is_active||a.user_status!=='active'||!verifyPassword(String(b.password||''),a.password_hash)) return json({error:'Invalid credentials or inactive account.'},401);
       const token=randomBytes(32).toString('base64url');
       await db.sql`INSERT INTO sessions(token_hash,user_id,role,employee_id,expires_at) VALUES(${hashToken(token)},${a.user_id},${a.role},${a.employee_id},NOW()+INTERVAL '7 days')`;
       return json({userId:a.user_id,role:a.role,fullName:a.full_name,employeeId:a.employee_id,mustChangePassword:Boolean(a.must_change_password)},200,{'Set-Cookie':sessionCookie(token,request)});

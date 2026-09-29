@@ -6,7 +6,7 @@ export type AccountStatus = 'active' | 'inactive';
 
 export type AttendanceAction = 'time_in' | 'break_out' | 'break_in' | 'time_out';
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'incomplete';
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'incomplete' | 'invalid';
 
 export type PayrollStatus = 'open' | 'for_approval' | 'approved' | 'finalized';
 

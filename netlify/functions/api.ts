@@ -70,7 +70,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
   const ar=await db.sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY date`;
   const attendance=ar.rows;
-  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${e.business_id}`;
+  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${e.business_id} OR business_id='all' ORDER BY CASE WHEN business_id=${e.business_id} THEN 0 ELSE 1 END LIMIT 1`;
   const holidayR=await db.sql`SELECT holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE (business_id=${e.business_id} OR business_id='all') AND holiday_date BETWEEN ${p.start_date} AND ${p.end_date}`;
   const holidayMap=new Map(holidayR.rows.map((h:any)=>[String(h.holidayDate).slice(0,10),h]));
   const ndRate=Number(hr.rows[0]?.nightDifferentialHourlyRate||0);
@@ -293,7 +293,7 @@ async function handle(request: Request) {
     }
     if(path==='admin/settings'&&m==='GET'&&isAdmin(u)){
       const biz=new URL(request.url).searchParams.get('businessId')||'all';
-      const s=(await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${biz}`).rows[0];
+      const s=(await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${biz} OR business_id='all' ORDER BY CASE WHEN business_id=${biz} THEN 0 ELSE 1 END LIMIT 1`).rows[0];
       const h=(await db.sql`SELECT id,business_id AS "businessId",holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE business_id=${biz} OR business_id='all' ORDER BY holiday_date`).rows;
       return json({businessId:biz,nightDifferentialHourlyRate:Number(s?.nightDifferentialHourlyRate||0),holidays:h.map((x:any)=>({...x,holidayDate:String(x.holidayDate).slice(0,10),overtimeRate:Number(x.overtimeRate)}))});
     }

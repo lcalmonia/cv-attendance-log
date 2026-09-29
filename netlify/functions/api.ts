@@ -170,7 +170,7 @@ async function handle(request: Request) {
   try {
     if(path==='health'&&m==='GET'){
       try{
-        await db.sql\`SELECT 1 AS ok\`;
+        await db.sql`SELECT 1 AS ok`;
         return json({ok:true,database:true});
       }catch(e:any){
         console.error('[CV Log API health]',e);

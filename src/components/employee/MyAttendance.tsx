@@ -110,7 +110,7 @@ export const MyAttendance: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">My Attendance Log</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Personal attendance record for the active cut-off period.
+            Personal attendance record for the selected cut-off period.
           </p>
         </div>
         <div className="w-full sm:w-auto">
@@ -143,7 +143,7 @@ export const MyAttendance: React.FC = () => {
                 <th className="py-3 px-4">Time In</th>
                 <th className="py-3 px-4">Break Window</th>
                 <th className="py-3 px-4">Time Out</th>
-                <th className="py-3 px-4">Lateness</th>
+                <th className="py-3 px-4">Late/Undertime/Overbreak</th>
                 <th className="py-3 px-4">Total Hours</th>
                 <th className="py-3 px-4">Status</th>
               </tr>
@@ -177,16 +177,16 @@ export const MyAttendance: React.FC = () => {
                     <td className="py-3 px-4 text-xs font-mono font-medium text-white">
                       {formatTime(att.timeOut)}
                     </td>
-                    <td className="py-3 px-4 text-xs">
-                      {att.lateMinutes > 0 ? (
-                        <span className="font-semibold text-amber-400">+{att.lateMinutes} mins</span>
+                    <td className="py-3 px-4 text-xs" title={'Late: '+(att.lateMinutes||0)+' min • Undertime: '+(att.undertimeMinutes||0)+' min • Overbreak: '+(att.overbreakMinutes||0)+' min'}>
+                      {(att.varianceMinutes || 0) > 0 ? (
+                        <span className="font-semibold text-amber-400">+{att.varianceMinutes} mins</span>
                       ) : (
                         <span className="text-slate-500">0 min</span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-200">
                       {att.totalWorkMinutes > 0
-                        ? `${(att.totalWorkMinutes / 60).toFixed(1)} hrs`
+                        ? `${Number(att.totalWorkMinutes / 60).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')} hrs`
                         : '—'}
                     </td>
                     <td className="py-3 px-4">{getStatusBadge(att.status)}</td>

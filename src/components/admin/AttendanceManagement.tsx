@@ -26,7 +26,7 @@ export const AttendanceManagement: React.FC = () => {
       alert(err.message || 'Unable to delete attendance.');
     }
   };
-  const badge=(s:AttendanceStatus)=>s==='present'?<span className="text-emerald-400"><CheckCircle2 className="inline w-3.5 h-3.5"/> Present</span>:s==='late'?<span className="text-amber-400"><Clock className="inline w-3.5 h-3.5"/> Late</span>:s==='absent'?<span className="text-red-400"><XCircle className="inline w-3.5 h-3.5"/> Absent</span>:<span className="text-slate-400"><AlertCircle className="inline w-3.5 h-3.5"/> Incomplete</span>;
+  const badge=(s:AttendanceStatus)=>s==='present'?<span className="text-emerald-400"><CheckCircle2 className="inline w-3.5 h-3.5"/> Present</span>:s==='late'?<span className="text-amber-400"><Clock className="inline w-3.5 h-3.5"/> Late</span>:s==='absent'?<span className="text-red-400"><XCircle className="inline w-3.5 h-3.5"/> Absent</span>:s==='invalid'?<span className="text-red-400"><AlertCircle className="inline w-3.5 h-3.5"/> Invalid</span>:<span className="text-slate-400"><AlertCircle className="inline w-3.5 h-3.5"/> Incomplete</span>;
   const filtered=records.filter(r=>r.employeeName.toLowerCase().includes(search.toLowerCase())||r.employeeIdCode.toLowerCase().includes(search.toLowerCase()));
   const input="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white";
   return <div className="space-y-6">

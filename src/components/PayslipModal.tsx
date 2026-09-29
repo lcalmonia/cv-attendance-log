@@ -95,15 +95,15 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between">
                   <span className="text-slate-300 print:text-gray-700">
-                    Basic Pay ({record.daysWorked} days)
+                    Base Duty Pay ({record.daysWorked} days × ₱{record.dailyRate.toLocaleString()})
                   </span>
                   <span className="font-mono font-medium text-white print:text-gray-900">
-                    ₱{record.basicPay.toLocaleString()}
+                    ₱{record.baseDutyPay.toLocaleString()}
                   </span>
                 </div>
 
+                {record.holidayOvertimePay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Overtime Pay (Holiday OT)</span><span className="font-mono font-medium">+₱{record.holidayOvertimePay.toLocaleString()}</span></div> : null}
                 {record.nightDifferentialPay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Night Differential ({(record.nightDifferentialHours||0).toFixed(1)} hrs)</span><span className="font-mono font-medium">+₱{record.nightDifferentialPay.toLocaleString()}</span></div> : null}
-                {record.holidayOvertimePay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Holiday Overtime</span><span className="font-mono font-medium">+₱{record.holidayOvertimePay.toLocaleString()}</span></div> : null}
                 {record.breakdown.incentives.map((inc, i) => (
                   <div key={i} className="flex justify-between text-emerald-400 print:text-emerald-700">
                     <span>{inc.name}</span>
@@ -126,8 +126,8 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
               <div className="space-y-2 text-xs">
                 {record.lateMinutesTotal > 0 && (
                   <div className="flex justify-between text-amber-400 print:text-amber-700">
-                    <span>Lateness ({record.lateMinutesTotal} mins)</span>
-                    <span className="font-mono">Calculated</span>
+                    <span>Late Deduction ({record.lateMinutesTotal} mins)</span>
+                    <span className="font-mono">-₱{record.lateDeduction.toLocaleString()}</span>
                   </div>
                 )}
 

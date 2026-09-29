@@ -1,0 +1,6 @@
+{
+  "name": "CV Log – Multi-Business Attendance & Payroll System",
+  "description": "Simple, clean multi-business attendance and payroll management system for CV Group of Companies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

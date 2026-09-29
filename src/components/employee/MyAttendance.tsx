@@ -1,0 +1,149 @@
+import React, { useEffect, useState } from 'react';
+import { Clock, CheckCircle2, XCircle, AlertCircle, Calendar } from 'lucide-react';
+import { AttendanceRecord, PayrollPeriod, AttendanceStatus } from '../../types';
+import { api } from '../../services/api';
+
+export const MyAttendance: React.FC = () => {
+  const [data, setData] = useState<{
+    period: PayrollPeriod;
+    attendance: (AttendanceRecord & { scheduledTime: string })[];
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.employee
+      .getAttendance()
+      .then((res) => setData(res))
+      .catch((err) => console.error(err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return '—';
+    try {
+      return new Date(isoString).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
+  const getStatusBadge = (status: AttendanceStatus) => {
+    switch (status) {
+      case 'present':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <CheckCircle2 className="w-3 h-3" /> Present
+          </span>
+        );
+      case 'late':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            <Clock className="w-3 h-3" /> Late
+          </span>
+        );
+      case 'absent':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+            <XCircle className="w-3 h-3" /> Absent
+          </span>
+        );
+      case 'incomplete':
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400">
+            <AlertCircle className="w-3 h-3" /> Incomplete
+          </span>
+        );
+    }
+  };
+
+  const attendance = data?.attendance || [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">My Attendance Log</h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Personal attendance record for the active cut-off period.
+          </p>
+        </div>
+        {data?.period && (
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
+            <Calendar className="w-4 h-4 text-purple-400" />
+            <span>{data.period.name}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-slate-300">
+            <thead className="bg-slate-950/80 text-xs font-semibold uppercase text-slate-400 border-b border-slate-800">
+              <tr>
+                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Scheduled Time</th>
+                <th className="py-3 px-4">Time In</th>
+                <th className="py-3 px-4">Break Window</th>
+                <th className="py-3 px-4">Time Out</th>
+                <th className="py-3 px-4">Lateness</th>
+                <th className="py-3 px-4">Total Hours</th>
+                <th className="py-3 px-4">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/80">
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
+                    Loading your attendance history…
+                  </td>
+                </tr>
+              ) : attendance.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
+                    No clock-in records logged yet for this cut-off period.
+                  </td>
+                </tr>
+              ) : (
+                attendance.map((att) => (
+                  <tr key={att.id} className="hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-4 font-mono font-medium text-white">{att.date}</td>
+                    <td className="py-3 px-4 text-xs font-semibold text-slate-300">
+                      {att.scheduledTime}
+                    </td>
+                    <td className="py-3 px-4 text-xs font-mono font-medium text-white">
+                      {formatTime(att.timeIn)}
+                    </td>
+                    <td className="py-3 px-4 text-xs font-mono text-slate-400">
+                      {att.breakOut ? `${formatTime(att.breakOut)} – ${formatTime(att.breakIn)}` : '—'}
+                    </td>
+                    <td className="py-3 px-4 text-xs font-mono font-medium text-white">
+                      {formatTime(att.timeOut)}
+                    </td>
+                    <td className="py-3 px-4 text-xs">
+                      {att.lateMinutes > 0 ? (
+                        <span className="font-semibold text-amber-400">+{att.lateMinutes} mins</span>
+                      ) : (
+                        <span className="text-slate-500">0 min</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-xs font-semibold text-slate-200">
+                      {att.totalWorkMinutes > 0
+                        ? `${(att.totalWorkMinutes / 60).toFixed(1)} hrs`
+                        : '—'}
+                    </td>
+                    <td className="py-3 px-4">{getStatusBadge(att.status)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};

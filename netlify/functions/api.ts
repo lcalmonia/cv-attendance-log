@@ -233,7 +233,8 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
-  const basic=Math.max(0,Math.round((daysWorked*Number(e.daily_rate)-lateDed)*100)/100);
+  const baseDutyPay=Math.round(daysWorked*Number(e.daily_rate)*100)/100;
+  const basic=Math.max(0,Math.round((baseDutyPay-lateDed)*100)/100);
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
   for(const i of incR.rows){
@@ -257,19 +258,19 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
-  const gross=Math.round((basic+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
+  const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
   const ed=await db.sql`SELECT * FROM employee_deductions WHERE employee_id=${employeeId} AND status='active' AND (recurring=true OR payroll_period_id=${periodId}) ORDER BY deduction_name`;
   const cd=await db.sql`SELECT * FROM deduction_types WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') ORDER BY name`;
   const deductions:any[]=[]; let empD=0, recD=0;
   for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
   for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
-  const total=Math.round((empD+recD)*100)/100, net=Math.max(0,Math.round((gross-total)*100)/100);
+  const total=Math.round((lateDed+empD+recD)*100)/100, net=Math.max(0,Math.round((gross-total)*100)/100);
   const appr=await db.sql`SELECT approved_at FROM payroll_approvals WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
     employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:Number(e.daily_rate),
-    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
+    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
     finalizedAt:p.status==='finalized'?dateOnly(p.payout_date):undefined,

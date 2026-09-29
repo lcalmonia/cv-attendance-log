@@ -8,8 +8,24 @@ const db = {
     const rows = await database.sql(strings, ...values as any[]);
     return { rows: Array.isArray(rows) ? rows : (rows as any)?.rows || [] };
   },
+  pool: database.pool,
 };
 const MAX_AGE = 7 * 24 * 60 * 60;
+async function withTransaction<T>(work: (client: any) => Promise<T>) {
+  const client = await database.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
@@ -36,6 +52,32 @@ function minutesBetweenTimes(start: unknown, end: unknown) {
   const sm = parts(s), em = parts(e);
   if (sm == null || em == null) return 0;
   return Math.max(0, (em - sm + 1440) % 1440);
+}
+function parseHm(v: unknown) {
+  const m = String(v ?? '').match(/^(\d{1,2}):(\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+}
+function diffMinutes(start: unknown, end: unknown) {
+  const s = parseHm(start), e = parseHm(end);
+  return Math.max(0, (e - s + 1440) % 1440);
+}
+function nightDifferentialMinutes(start: string, end: string) {
+  const s = new Date(start), e = new Date(end);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) return 0;
+  const PH_OFFSET_MS = 8 * 60 * 60 * 1000;
+  let total = 0;
+  const cursor = new Date(s);
+  while (cursor < e) {
+    const next = new Date(Math.min(cursor.getTime() + 60_000, e.getTime()));
+    const phLocal = new Date(cursor.getTime() + PH_OFFSET_MS);
+    const hour = phLocal.getUTCHours();
+    if (hour >= 22 || hour < 6) total += Math.round((next.getTime() - cursor.getTime()) / 60000);
+    cursor.setTime(next.getTime());
+  }
+  return total;
+}
+function holidayTypeOk(v: unknown) {
+  return ['regular','special_non_working','special_working'].includes(String(v ?? ''));
 }
 function scheduleBreakMinutes(s: any) {
   return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
@@ -87,12 +129,17 @@ function timeOk(v: unknown) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v |
 async function currentUser(request: Request) {
   const token = cookies(request).cvlog_session;
   if (!token) return null;
-  return (await db.sql`
-    SELECT s.user_id AS "userId", s.role, s.employee_id AS "employeeId",
+  const r = await db.sql`
+    SELECT s.user_id AS "userId", u.role, u.employee_id AS "employeeId",
            e.id AS "employeeDbId", e.business_id AS "businessId"
-    FROM sessions s LEFT JOIN employees e ON e.user_id=s.user_id
+    FROM sessions s
+    JOIN users u ON u.id=s.user_id AND u.status='active'
+    JOIN auth_accounts aa ON aa.user_id=u.id AND aa.is_active=true
+    LEFT JOIN employees e ON e.user_id=s.user_id
     WHERE s.token_hash=${hashToken(token)} AND s.expires_at>NOW()
-  `).then(r => r.rows[0] || null);
+      AND (u.role='super_admin' OR e.status='active')
+  `;
+  return r.rows[0] || null;
 }
 const isAdmin=(u:any)=>u?.role==='super_admin';
 const isEmployee=(u:any)=>u?.role==='employee';
@@ -115,11 +162,11 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
     const present=!!a?.time_in;
     if(present){daysWorked++; late+=Number(a.late_minutes||0);}
-    const dateKey=String(s.date).slice(0,10), nd=present&&a?.time_out?nightDifferentialMinutes(String(a.time_in),String(a.time_out)):0;
+    const dateKey=String(s.date).slice(0,10), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
-      const worked=normalizedWorkMinutes(a,s), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
+      const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
     const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
@@ -131,8 +178,9 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
   for(const i of incR.rows){
-    let q=duty.length>0 && daysWorked===duty.length;
+    let q=true;
     if(i.incentive_type==='attendance' || !i.incentive_type){
+      q=duty.length>0;
       for(const s of duty){
         const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
         const present=!!a?.time_in;
@@ -193,18 +241,35 @@ async function handle(request: Request) {
       if(exists.rows[0]) return json({error:'Initial administrator setup has already been completed.'},403);
       if(!b.fullName||!b.employeeId||!b.password) return json({error:'Name, employee ID, and password are required.'},400);
       const userId=`usr_${randomBytes(8).toString('hex')}`, now=new Date().toISOString();
-      await db.sql`INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,status,must_change_password) VALUES(${userId},${b.employeeId},${b.fullName},${b.email||''},${b.mobileNumber||''},'super_admin','active',false)`;
-      await db.sql`INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES(${userId},${norm(b.employeeId)},${normMobile(b.mobileNumber)||null},${hashPassword(String(b.password))},false,true,${now},${now})`;
+      const loginId=norm(b.employeeId), mobileLogin=normMobile(b.mobileNumber)||null, passwordHash=hashPassword(String(b.password));
+      if((await db.sql`SELECT 1 FROM users WHERE lower(employee_id)=lower(${b.employeeId}) LIMIT 1`).rows[0]) return json({error:'This Employee ID is already in use.'},400);
+      if((await db.sql`SELECT 1 FROM auth_accounts WHERE login_id=${loginId} LIMIT 1`).rows[0]) return json({error:'This Employee ID is already in use for login.'},400);
+      if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} LIMIT 1`).rows[0]) return json({error:'This mobile number is already in use.'},400);
+      try{
+        await withTransaction(async (client) => {
+          await client.query(
+            'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+            [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','super_admin','active',false]
+          );
+          await client.query(
+            'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+            [userId,loginId,mobileLogin,passwordHash,false,true,now,now]
+          );
+        });
+      }catch(e:any){
+        if(e?.code==='23505')return json({error:'Initial administrator setup has already been completed or the login details are already in use.'},409);
+        throw e;
+      }
       return json({success:true});
     }
     if(path==='auth/login'&&m==='POST'){
       const b=await request.json(), login=norm(b.loginId), mobile=normMobile(b.loginId);
-      const r=await db.sql`SELECT a.*,u.employee_id,u.full_name,u.role,u.status FROM auth_accounts a JOIN users u ON u.id=a.user_id WHERE a.login_id=${login} OR (a.mobile_login IS NOT NULL AND a.mobile_login=${mobile}) LIMIT 1`;
+      const r=await db.sql`SELECT a.*,u.employee_id,u.full_name,u.role,u.status AS user_status,e.status AS employee_status FROM auth_accounts a JOIN users u ON u.id=a.user_id LEFT JOIN employees e ON e.user_id=u.id WHERE (a.login_id=${login} OR (a.mobile_login IS NOT NULL AND a.mobile_login=${mobile})) AND (u.role='super_admin' OR e.status='active') LIMIT 1`;
       const a=r.rows[0];
-      if(!a||!a.is_active||a.status!=='active'||!verifyPassword(String(b.password||''),a.password_hash)) return json({error:'Invalid credentials or inactive account.'},401);
+      if(!a||!a.is_active||a.user_status!=='active'||!verifyPassword(String(b.password||''),a.password_hash)) return json({error:'Invalid credentials or inactive account.'},401);
       const token=randomBytes(32).toString('base64url');
       await db.sql`INSERT INTO sessions(token_hash,user_id,role,employee_id,expires_at) VALUES(${hashToken(token)},${a.user_id},${a.role},${a.employee_id},NOW()+INTERVAL '7 days')`;
-      return json({token,userId:a.user_id,role:a.role,fullName:a.full_name,employeeId:a.employee_id,mustChangePassword:Boolean(a.must_change_password)},200,{'Set-Cookie':sessionCookie(token,request)});
+      return json({userId:a.user_id,role:a.role,fullName:a.full_name,employeeId:a.employee_id,mustChangePassword:Boolean(a.must_change_password)},200,{'Set-Cookie':sessionCookie(token,request)});
     }
     if(path==='auth/session'&&m==='GET'){
       if(!u) return json({authenticated:false},401);
@@ -223,8 +288,12 @@ async function handle(request: Request) {
       const ok=verifyPassword(String(b.currentPassword||''),a.password_hash)||(a.must_change_password&&norm(b.currentPassword)===norm(u.employeeId));
       if(!ok)return json({error:'Current password is incorrect.'},400);
       if(String(b.newPassword||'').length<6)return json({error:'New password must be at least 6 characters.'},400);
-      await db.sql`UPDATE auth_accounts SET password_hash=${hashPassword(b.newPassword)},must_change_password=false,updated_at=NOW() WHERE user_id=${u.userId}`;
-      await db.sql`UPDATE users SET must_change_password=false WHERE id=${u.userId}`; return json({success:true});
+      const newHash=hashPassword(String(b.newPassword));
+      await withTransaction(async (client) => {
+        await client.query('UPDATE auth_accounts SET password_hash=$1,must_change_password=false,updated_at=NOW() WHERE user_id=$2',[newHash,u.userId]);
+        await client.query('UPDATE users SET must_change_password=false WHERE id=$1',[u.userId]);
+      });
+      return json({success:true});
     }
     if(!u)return json({error:'Unauthorized'},401);
     if(path==='admin/dashboard'&&m==='GET'&&isAdmin(u)){
@@ -256,24 +325,53 @@ async function handle(request: Request) {
       const biz=(await db.sql`SELECT id FROM businesses WHERE id=${b.businessId} AND status='active'`).rows[0]; if(!biz)return json({error:'Selected business does not exist or is inactive.'},400);
       if((await db.sql`SELECT 1 FROM employees WHERE lower(employee_id)=lower(${b.employeeId})`).rows[0])return json({error:'An employee with this Employee ID already exists.'},400);
       const userId=`usr_${randomBytes(8).toString('hex')}`, empId=`emp_${randomBytes(8).toString('hex')}`, now=new Date().toISOString(), status=b.status||'active';
-      await db.sql`INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,business_id,status,must_change_password) VALUES(${userId},${b.employeeId},${b.fullName},${b.email||''},${b.mobileNumber||''},'employee',${b.businessId},${status},true)`;
-      await db.sql`INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES(${userId},${norm(b.employeeId)},${normMobile(b.mobileNumber)||null},${hashPassword(norm(b.employeeId))},true,${status==='active'},${now},${now})`;
+      const loginId=norm(b.employeeId), mobileLogin=normMobile(b.mobileNumber)||null;
+      if(String(b.employeeId).trim().length<6)return json({error:'Employee ID must be at least 6 characters because it is the temporary password.'},400);
+      if((await db.sql`SELECT 1 FROM users WHERE lower(employee_id)=lower(${b.employeeId}) LIMIT 1`).rows[0])return json({error:'An account with this Employee ID already exists.'},400);
+      if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} LIMIT 1`).rows[0])return json({error:'An account with this mobile number already exists.'},400);
       const emp={id:empId,userId,employeeId:b.employeeId,businessId:b.businessId,fullName:b.fullName,mobileNumber:b.mobileNumber||'',email:b.email||'',position:b.position||'Staff',employmentStatus:b.employmentStatus||'regular',dateHired:b.dateHired||phNow().date,dailyRate:Number(b.dailyRate||600),requiredHoursPerDay:Number(b.requiredHoursPerDay||8),status};
-      await db.sql`INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES(${emp.id},${emp.userId},${emp.employeeId},${emp.businessId},${emp.fullName},${emp.mobileNumber},${emp.email},${emp.position},${emp.employmentStatus},${emp.dateHired},${emp.dailyRate},${emp.requiredHoursPerDay},${emp.status})`;
+      try{
+        await withTransaction(async (client) => {
+          await client.query(
+            'INSERT INTO users(id,employee_id,full_name,email,mobile_number,role,business_id,status,must_change_password) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+            [userId,b.employeeId,b.fullName,b.email||'',b.mobileNumber||'','employee',b.businessId,status,true]
+          );
+          await client.query(
+            'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+            [userId,loginId,mobileLogin,hashPassword(norm(b.employeeId)),true,status==='active',now,now]
+          );
+          await client.query(
+            'INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+            [emp.id,emp.userId,emp.employeeId,emp.businessId,emp.fullName,emp.mobileNumber,emp.email,emp.position,emp.employmentStatus,emp.dateHired,emp.dailyRate,emp.requiredHoursPerDay,emp.status]
+          );
+        });
+      }catch(e:any){
+        if(e?.code==='23505')return json({error:'Employee ID or mobile number is already in use.'},409);
+        throw e;
+      }
       return json(emp);
     }
     if(path.startsWith('admin/employees/')&&path.endsWith('/reset-password')&&m==='POST'&&isAdmin(u)){
       const id=path.split('/')[2], e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404);
-      await db.sql`UPDATE auth_accounts SET password_hash=${hashPassword(norm(e.employee_id))},must_change_password=true,updated_at=NOW() WHERE user_id=${e.user_id}`;
-      await db.sql`UPDATE users SET must_change_password=true WHERE id=${e.user_id}`; return json({success:true,message:`Password reset to temporary: ${e.employee_id}`});
+      if(String(e.employee_id).trim().length<6)return json({error:'This employee ID is shorter than the required 6-character minimum and cannot be used as a temporary password.'},400);
+      const resetHash=hashPassword(norm(e.employee_id));
+      await withTransaction(async (client) => {
+        await client.query('UPDATE auth_accounts SET password_hash=$1,must_change_password=true,updated_at=NOW() WHERE user_id=$2',[resetHash,e.user_id]);
+        await client.query('UPDATE users SET must_change_password=true WHERE id=$1',[e.user_id]);
+      });
+      return json({success:true,message:`Password reset to temporary: ${e.employee_id}`});
     }
     if(path.startsWith('admin/employees/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2]; const e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404); const b=await request.json();
       const n={fullName:b.fullName??e.full_name,mobileNumber:b.mobileNumber??e.mobile_number,email:b.email??e.email,position:b.position??e.position,employmentStatus:b.employmentStatus??e.employment_status,dateHired:b.dateHired??String(e.date_hired).slice(0,10),businessId:b.businessId??e.business_id,dailyRate:b.dailyRate!==undefined?Number(b.dailyRate):Number(e.daily_rate),requiredHoursPerDay:b.requiredHoursPerDay!==undefined?Number(b.requiredHoursPerDay):Number(e.required_hours_per_day),status:b.status??e.status};
-      const validBiz=(await db.sql`SELECT 1 FROM businesses WHERE id=${n.businessId}`).rows[0]; if(!validBiz)return json({error:'Business not found.'},400);
-      await db.sql`UPDATE employees SET full_name=${n.fullName},mobile_number=${n.mobileNumber},email=${n.email},position=${n.position},employment_status=${n.employmentStatus},date_hired=${n.dateHired},business_id=${n.businessId},daily_rate=${n.dailyRate},required_hours_per_day=${n.requiredHoursPerDay},status=${n.status} WHERE id=${id}`;
-      await db.sql`UPDATE users SET full_name=${n.fullName},mobile_number=${n.mobileNumber},email=${n.email},business_id=${n.businessId},status=${n.status} WHERE id=${e.user_id}`;
-      await db.sql`UPDATE auth_accounts SET mobile_login=${normMobile(n.mobileNumber)||null},is_active=${n.status==='active'} WHERE user_id=${e.user_id}`;
+      const validBiz=(await db.sql`SELECT 1 FROM businesses WHERE id=${n.businessId} AND status='active'`).rows[0]; if(!validBiz)return json({error:'Business does not exist or is inactive.'},400);
+      const mobileLogin=normMobile(n.mobileNumber)||null;
+      if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} AND user_id<>${e.user_id} LIMIT 1`).rows[0])return json({error:'This mobile number is already in use by another account.'},400);
+      await withTransaction(async (client) => {
+        await client.query('UPDATE employees SET full_name=$1,mobile_number=$2,email=$3,position=$4,employment_status=$5,date_hired=$6,business_id=$7,daily_rate=$8,required_hours_per_day=$9,status=$10 WHERE id=$11',[n.fullName,n.mobileNumber,n.email,n.position,n.employmentStatus,n.dateHired,n.businessId,n.dailyRate,n.requiredHoursPerDay,n.status,id]);
+        await client.query('UPDATE users SET full_name=$1,mobile_number=$2,email=$3,business_id=$4,status=$5 WHERE id=$6',[n.fullName,n.mobileNumber,n.email,n.businessId,n.status,e.user_id]);
+        await client.query('UPDATE auth_accounts SET mobile_login=$1,is_active=$2 WHERE user_id=$3',[mobileLogin,n.status==='active',e.user_id]);
+      });
       return json({id,userId:e.user_id,employeeId:e.employee_id,...n});
     }
     if(path==='admin/periods'&&m==='GET'&&isAdmin(u)){
@@ -302,23 +400,35 @@ async function handle(request: Request) {
       if(!cur)return json({error:'Current payroll period not found.'},404);
       if(!dateOk(b.nextStartDate)||!dateOk(b.nextEndDate)||b.nextEndDate<b.nextStartDate)return json({error:'Valid next cut-off start/end dates are required.'},400);
       const payout=dateOk(b.nextPayoutDate)?b.nextPayoutDate:b.nextEndDate;
-      let next=(await db.sql`SELECT * FROM payroll_periods WHERE start_date=${b.nextStartDate} AND end_date=${b.nextEndDate} LIMIT 1`).rows[0];
-      if(!next){
-        const id=`period_${randomBytes(8).toString('hex')}`;
-        await db.sql`INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES(${id},${b.name||`Next Cut-Off ${b.nextStartDate} to ${b.nextEndDate}`},${b.nextStartDate},${b.nextEndDate},${payout},'open')`;
-        next=(await periodById(id));
-      }
-      const curStart=new Date(String(cur.start_date).slice(0,10)+'T00:00:00Z'), nextStart=new Date(String(next.start_date).slice(0,10)+'T00:00:00Z');
       const source=(await db.sql`SELECT * FROM schedules WHERE payroll_period_id=${cur.id} ORDER BY date`).rows;
+      let next=(await db.sql`SELECT * FROM payroll_periods WHERE start_date=${b.nextStartDate} AND end_date=${b.nextEndDate} LIMIT 1`).rows[0];
       let copied=0;
-      for(const s of source){
-        const d=new Date(String(s.date).slice(0,10)+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+Math.round((nextStart.getTime()-curStart.getTime())/86400000));
-        const date=d.toISOString().slice(0,10);
-        if(date<String(next.start_date).slice(0,10)||date>String(next.end_date).slice(0,10))continue;
-        const id=`sched_${randomBytes(8).toString('hex')}`;
-        await db.sql`INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES(${id},${s.employee_id},${next.id},${date},${s.required_time_in},${s.required_time_out},${s.break_out},${s.break_in},${s.is_working_day},${s.notes}) ON CONFLICT(employee_id,payroll_period_id,date) DO NOTHING`;
-        copied++;
-      }
+      await withTransaction(async (client) => {
+        if(!next){
+          const id=`period_${randomBytes(8).toString('hex')}`;
+          await client.query(
+            'INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES($1,$2,$3,$4,$5,$6)',
+            [id,b.name||`Next Cut-Off ${b.nextStartDate} to ${b.nextEndDate}`,b.nextStartDate,b.nextEndDate,payout,'open']
+          );
+          const nr=await client.query('SELECT * FROM payroll_periods WHERE id=$1',[id]);
+          next=nr.rows[0];
+        }
+        const curStart=new Date(String(cur.start_date).slice(0,10)+'T00:00:00Z');
+        const nextStart=new Date(String(next.start_date).slice(0,10)+'T00:00:00Z');
+        const shiftDays=Math.round((nextStart.getTime()-curStart.getTime())/86400000);
+        for(const s of source){
+          const d=new Date(String(s.date).slice(0,10)+'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate()+shiftDays);
+          const date=d.toISOString().slice(0,10);
+          if(date<String(next.start_date).slice(0,10)||date>String(next.end_date).slice(0,10))continue;
+          const id=`sched_${randomBytes(8).toString('hex')}`;
+          const ins=await client.query(
+            'INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(employee_id,payroll_period_id,date) DO NOTHING',
+            [id,s.employee_id,next.id,date,s.required_time_in,s.required_time_out,s.break_out,s.break_in,s.is_working_day,s.notes]
+          );
+          copied+=ins.rowCount||0;
+        }
+      });
       return json({success:true,period:{id:next.id,name:next.name,startDate:String(next.start_date).slice(0,10),endDate:String(next.end_date).slice(0,10),payoutDate:String(next.payout_date).slice(0,10),status:next.status},copiedSchedules:copied});
     }
     if(path==='admin/schedules'&&m==='POST'&&isAdmin(u)){
@@ -425,7 +535,7 @@ async function handle(request: Request) {
         a=(await db.sql`SELECT a.*,s.payroll_period_id,s.required_time_in,s.required_time_out,s.is_working_day FROM attendance a JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date WHERE a.employee_id=${e.id} AND a.time_in IS NOT NULL AND a.time_out IS NULL AND s.is_working_day=true ORDER BY a.date DESC,a.time_in DESC LIMIT 1`).rows[0];
         if(a) s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${a.date} AND payroll_period_id=${a.payroll_period_id}`).rows[0];
         if(!a){return json({error:'No open attendance record found. Please contact your supervisor if you forgot to time in.'},400);}
-        if(b.action==='break_out' || b.action==='break_in'){
+        if(b.action==='break_out' || b.action==='break_in' || b.action==='time_out'){
           const age=now.getTime()-new Date(a.time_in).getTime();
           if(age>36*60*60*1000)return json({error:'The open attendance record is too old. Please contact your supervisor.'},400);
         }
@@ -446,20 +556,20 @@ async function handle(request: Request) {
       } else {
         if(a.time_out)return json({error:'Already timed out.'},400);
         if(a.break_out&&!a.break_in)return json({error:'Please complete your break before timing out.'},400);
-        const work=Math.max(0,Math.floor((now.getTime()-new Date(a.time_in).getTime()-(a.break_out&&a.break_in?Math.max(0,new Date(a.break_in).getTime()-new Date(a.break_out).getTime()):0))/60000));
+        const work=normalizedWorkMinutes({...a,time_out:ph.iso},s);
         await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${Number(a.late_minutes||0)>0?'late':'present'},updated_at=NOW() WHERE id=${a.id}`;
       }
       a=(await db.sql`SELECT * FROM attendance WHERE id=${a.id}`).rows[0];
       return json({success:true,attendance:{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:String(a.date).slice(0,10),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status}});
     }
     if(path==='employee/schedules'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId');const r=id?await db.sql`SELECT * FROM schedules WHERE employee_id=${u.employeeDbId} AND payroll_period_id=${id} ORDER BY date`:await db.sql`SELECT * FROM schedules WHERE employee_id=${u.employeeDbId} ORDER BY date DESC`;return json(r.rows.map((s:any)=>({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:String(s.date).slice(0,10),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes})));}
-    if(path==='employee/attendance'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId'),p=id?await periodById(id):await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`.then(r=>r.rows[0]);if(!p)return json({period:null,attendance:[]});const r=await db.sql`SELECT a.*,s.required_time_in,s.required_time_out,s.is_working_day FROM attendance a LEFT JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=${p.id} WHERE a.employee_id=${u.employeeDbId} AND a.date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY a.date DESC`;return json({period:{id:p.id,name:p.name,startDate:String(p.start_date).slice(0,10),endDate:String(p.end_date).slice(0,10),payoutDate:String(p.payout_date).slice(0,10),status:p.status},attendance:r.rows.map((a:any)=>({id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:String(a.date).slice(0,10),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status,scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'}))});}
-    if(path==='employee/payroll'&&m==='GET'&&isEmployee(u)){const id=new URL(request.url).searchParams.get('periodId'),p=id?await periodById(id):await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`.then(r=>r.rows[0]);if(!p)return json({error:'No active payroll period found.'},404);return json(await calculatePayroll(u.employeeDbId,p.id));}
+    if(path==='employee/attendance'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId'),p=id?await periodById(id):(await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`).rows[0];if(!p)return json({period:null,attendance:[]});const r=await db.sql`SELECT a.*,s.required_time_in,s.required_time_out,s.is_working_day FROM attendance a LEFT JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=${p.id} WHERE a.employee_id=${u.employeeDbId} AND a.date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY a.date DESC`;return json({period:{id:p.id,name:p.name,startDate:String(p.start_date).slice(0,10),endDate:String(p.end_date).slice(0,10),payoutDate:String(p.payout_date).slice(0,10),status:p.status},attendance:r.rows.map((a:any)=>({id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:String(a.date).slice(0,10),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status,scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'}))});}
+    if(path==='employee/payroll'&&m==='GET'&&isEmployee(u)){const id=new URL(request.url).searchParams.get('periodId'),p=id?await periodById(id):(await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`).rows[0];if(!p)return json({error:'No active payroll period found.'},404);return json(await calculatePayroll(u.employeeDbId,p.id));}
     if(path==='employee/payroll/approve'&&m==='POST'&&isEmployee(u)){const b=await request.json(),p=await periodById(b.periodId);if(!p)return json({error:'Payroll period not found.'},404);if(p.status!=='for_approval')return json({error:'Payroll is not currently awaiting employee approval.'},400);const now=new Date().toISOString();await db.sql`INSERT INTO payroll_approvals(payroll_period_id,employee_id,approved_at) VALUES(${b.periodId},${u.employeeDbId},${now}) ON CONFLICT(payroll_period_id,employee_id) DO UPDATE SET approved_at=EXCLUDED.approved_at`;return json({success:true,approvedAt:now});}
     return json({error:'Not found'},404);
   } catch(e:any) {
     console.error('[CV Log API]',e);
-    return json({error:e?.message||'Internal server error.'},500);
+    return json({error:'Internal server error.'},500);
   }
 }
 export default async (request: Request) => handle(request);

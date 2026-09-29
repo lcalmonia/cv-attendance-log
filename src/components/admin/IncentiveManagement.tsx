@@ -55,8 +55,10 @@ export const IncentiveManagement: React.FC = () => {
       name: '',
       description: '',
       amount: 1000,
+      incentiveType: 'attendance',
       requireNoLate: true,
       requireNoAbsence: true,
+      requireNoUndertime: true,
       status: 'active',
       effectiveDate: new Date().toISOString().slice(0, 10),
     });
@@ -342,7 +344,7 @@ export const IncentiveManagement: React.FC = () => {
                   Attendance Conditions
                 </span>
 
-                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                {formData.incentiveType === 'attendance' && <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formData.requireNoAbsence}
@@ -352,7 +354,7 @@ export const IncentiveManagement: React.FC = () => {
                     className="w-4 h-4 rounded text-blue-600 bg-slate-950 border-slate-700"
                   />
                   <span>Must have zero absences on all scheduled duty days</span>
-                </label>
+                </label>}
 
                 {formData.incentiveType === 'attendance' && <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                   <input

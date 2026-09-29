@@ -222,7 +222,8 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const attendanceDays:any[]=[];
   for(const s of duty){
     const a=attendance.find((x:any)=>dateOnly(x.date)===dateOnly(s.date));
-    const present=!!a?.time_in;
+    const invalid=isInvalidShortDuty(a,s);
+    const present=!!a?.time_in && !invalid;
     if(present){daysWorked++; late+=Number(a.late_minutes||0);}
     const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
     nightDiffMinutes+=nd;
@@ -232,7 +233,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
     const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
-    attendanceDays.push({date:dateKey,status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?a.status:'absent',lateMinutes:present?Number(a?.late_minutes||0):0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;

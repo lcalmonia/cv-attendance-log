@@ -275,15 +275,35 @@ export const MyPayroll: React.FC = () => {
           <div className="space-y-3 text-sm">
             <div className="flex justify-between items-center py-1">
               <div>
-                <span className="font-medium text-slate-200">Basic Duty Pay</span>
+                <span className="font-medium text-slate-200">Base Duty Pay</span>
                 <span className="text-xs text-slate-500 block">
-                  {payroll.daysWorked} completed shifts × ₱{payroll.dailyRate.toLocaleString()}
+                  {payroll.daysWorked} days × ₱{payroll.dailyRate.toLocaleString()}
                 </span>
               </div>
               <span className="font-mono font-semibold text-white">
-                ₱{payroll.basicPay.toLocaleString()}
+                ₱{payroll.baseDutyPay.toLocaleString()}
               </span>
             </div>
+
+            {payroll.holidayOvertimePay ? (
+              <div className="flex justify-between items-center py-1 text-cyan-400">
+                <div>
+                  <span className="font-medium">Overtime Pay</span>
+                  <span className="text-xs text-cyan-500/80 block">Holiday overtime</span>
+                </div>
+                <span className="font-mono font-semibold">+₱{payroll.holidayOvertimePay.toLocaleString()}</span>
+              </div>
+            ) : null}
+
+            {payroll.nightDifferentialPay ? (
+              <div className="flex justify-between items-center py-1 text-cyan-400">
+                <div>
+                  <span className="font-medium">Night Differential</span>
+                  <span className="text-xs text-cyan-500/80 block">{(payroll.nightDifferentialHours || 0).toFixed(2)} night hours</span>
+                </div>
+                <span className="font-mono font-semibold">+₱{payroll.nightDifferentialPay.toLocaleString()}</span>
+              </div>
+            ) : null}
 
             {payroll.breakdown.incentives.length > 0 ? (
               payroll.breakdown.incentives.map((inc, i) => (
@@ -313,12 +333,12 @@ export const MyPayroll: React.FC = () => {
             {payroll.lateMinutesTotal > 0 && (
               <div className="flex justify-between items-center py-1 text-amber-400">
                 <div>
-                  <span className="font-medium">Total Late Minutes</span>
+                  <span className="font-medium">Late Deduction</span>
                   <span className="text-xs text-amber-500/80 block">
-                    {payroll.lateMinutesTotal} total minutes late across cut-off
+                    {payroll.lateMinutesTotal} late minutes
                   </span>
                 </div>
-                <span className="font-mono font-semibold text-xs">Deducted from daily pay</span>
+                <span className="font-mono font-semibold">-₱{payroll.lateDeduction.toLocaleString()}</span>
               </div>
             )}
 

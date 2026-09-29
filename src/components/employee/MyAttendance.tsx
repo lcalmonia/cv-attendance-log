@@ -4,19 +4,64 @@ import { AttendanceRecord, PayrollPeriod, AttendanceStatus } from '../../types';
 import { api } from '../../services/api';
 
 export const MyAttendance: React.FC = () => {
+  const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
+  const [selectedPeriodId, setSelectedPeriodId] = useState('');
   const [data, setData] = useState<{
     period: PayrollPeriod;
     attendance: (AttendanceRecord & { scheduledTime: string })[];
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const loadAttendance = async (periodId: string) => {
+    if (!periodId) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.employee.getAttendance(periodId);
+      setData(res);
+    } catch (err) {
+      console.error(err);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    api.employee
-      .getAttendance()
-      .then((res) => setData(res))
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
+    const init = async () => {
+      setLoading(true);
+      try {
+        const list = await api.employee.getPeriods();
+        setPeriods(list);
+        const active = list.find((p) => p.status === 'open' || p.status === 'for_approval') || list[0];
+        if (active) {
+          setSelectedPeriodId(active.id);
+          await loadAttendance(active.id);
+        } else {
+          setData(null);
+        }
+      } catch (err) {
+        console.error(err);
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
   }, []);
+
+  useEffect(() => {
+    if (selectedPeriodId) loadAttendance(selectedPeriodId);
+  }, [selectedPeriodId]);
+
+  const formatDate = (date: string) => {
+    const d = new Date(`${date}T12:00:00`);
+    return Number.isNaN(d.getTime())
+      ? date
+      : d.toLocaleDateString('en-PH', { month: 'short', day: '2-digit', year: 'numeric', timeZone: 'Asia/Manila' });
+  };
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '—';
@@ -68,12 +113,24 @@ export const MyAttendance: React.FC = () => {
             Personal attendance record for the active cut-off period.
           </p>
         </div>
-        {data?.period && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
-            <Calendar className="w-4 h-4 text-purple-400" />
-            <span>{data.period.name}</span>
+        <div className="w-full sm:w-auto">
+          <label className="block text-xs font-medium text-slate-400 mb-1">Payroll Cut-Off Period</label>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-purple-400 shrink-0" />
+            <select
+              value={selectedPeriodId}
+              onChange={(e) => setSelectedPeriodId(e.target.value)}
+              className="w-full sm:w-[360px] bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              {periods.length === 0 ? <option value="">No payroll cut-offs available</option> : null}
+              {periods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.startDate} to {p.endDate})
+                </option>
+              ))}
+            </select>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
@@ -107,7 +164,7 @@ export const MyAttendance: React.FC = () => {
               ) : (
                 attendance.map((att) => (
                   <tr key={att.id} className="hover:bg-slate-800/40 transition">
-                    <td className="py-3 px-4 font-mono font-medium text-white">{att.date}</td>
+                    <td className="py-3 px-4 font-medium text-white">{formatDate(att.date)}</td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-300">
                       {att.scheduledTime}
                     </td>

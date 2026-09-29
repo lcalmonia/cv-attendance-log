@@ -133,7 +133,7 @@ export const EmployeeManagement: React.FC = () => {
 
   const handleDeleteEmployee = async (emp: Employee) => {
     const confirmed = confirm(
-      `Delete employee ${emp.fullName} (${emp.employeeId}) permanently?\\n\\nThis will also remove their schedules, attendance records, deductions, payroll approvals, login account, and active sessions. This action cannot be undone.`
+      `Delete employee ${emp.fullName} (${emp.employeeId}) permanently?\n\nThis will also remove their schedules, attendance records, deductions, payroll approvals, login account, and active sessions. This action cannot be undone.`
     );
     if (!confirmed) return;
 

@@ -76,7 +76,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
     const present=!!a?.time_in;
     if(present){daysWorked++; late+=Number(a.late_minutes||0);}
-    attendanceDays.push({date:String(s.date).slice(0,10),status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(Number(a?.total_work_minutes||0)/6)/10});
+    attendanceDays.push({date:String(s.date).slice(0,10),status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(Number(a?.total_work_minutes||0)/60*10)/10});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;

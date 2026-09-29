@@ -523,6 +523,13 @@ async function handle(request: Request) {
       await db.sql`INSERT INTO attendance(id,employee_id,business_id,date,time_in,break_out,break_in,time_out,late_minutes,total_work_minutes,status) VALUES(${id},${e.id},${e.business_id},${b.date},${ti},${bo},${bi},${to},${late},${work},${status}) ON CONFLICT(employee_id,date) DO UPDATE SET time_in=EXCLUDED.time_in,break_out=EXCLUDED.break_out,break_in=EXCLUDED.break_in,time_out=EXCLUDED.time_out,late_minutes=EXCLUDED.late_minutes,total_work_minutes=EXCLUDED.total_work_minutes,status=EXCLUDED.status,updated_at=NOW()`;
       return json({success:true,id});
     }
+    if(path.startsWith('admin/attendance/')&&m==='DELETE'&&isAdmin(u)){
+      const id=path.split('/')[2];
+      const a=(await db.sql`SELECT id FROM attendance WHERE id=${id}`).rows[0];
+      if(!a)return json({error:'Attendance record not found.'},404);
+      await db.sql`DELETE FROM attendance WHERE id=${id}`;
+      return json({success:true});
+    }
     if(path.startsWith('admin/attendance/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2], a=(await db.sql`SELECT * FROM attendance WHERE id=${id}`).rows[0]; if(!a)return json({error:'Attendance record not found.'},404);
       const b=await request.json(), iso=(v:any)=>v?new Date(v).toISOString():null;

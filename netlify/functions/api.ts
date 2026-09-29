@@ -186,6 +186,10 @@ const isAdmin=(u:any)=>u?.role==='super_admin';
 const isEmployee=(u:any)=>u?.role==='employee';
 async function employeeById(id:string) { const r=await db.sql`SELECT * FROM employees WHERE id=${id}`; return r.rows[0]||null; }
 async function periodById(id:string) { const r=await db.sql`SELECT * FROM payroll_periods WHERE id=${id}`; return r.rows[0]||null; }
+async function employeePayrollPeriods() {
+  const r = await db.sql`SELECT id,name,start_date AS "startDate",end_date AS "endDate",payout_date AS "payoutDate",status FROM payroll_periods ORDER BY start_date DESC LIMIT 2`;
+  return r.rows;
+}
 async function calculatePayroll(employeeId:string, periodId:string) {
   const e=await employeeById(employeeId), p=await periodById(periodId);
   if(!e||!p) throw new Error('Employee or payroll period not found.');
@@ -635,8 +639,40 @@ async function handle(request: Request) {
     }
     if(path==='employee/schedules'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId');const r=id?await db.sql`SELECT * FROM schedules WHERE employee_id=${u.employeeDbId} AND payroll_period_id=${id} ORDER BY date`:await db.sql`SELECT * FROM schedules WHERE employee_id=${u.employeeDbId} ORDER BY date DESC`;return json(r.rows.map((s:any)=>({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes})));}
     if(path==='employee/attendance'&&m==='GET'&&isEmployee(u)){const q=new URL(request.url).searchParams,id=q.get('periodId'),p=id?await periodById(id):(await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`).rows[0];if(!p)return json({period:null,attendance:[]});const r=await db.sql`SELECT a.*,s.required_time_in,s.required_time_out,s.break_out AS schedule_break_out,s.break_in AS schedule_break_in,s.is_working_day,s.date AS schedule_date FROM attendance a LEFT JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=${p.id} WHERE a.employee_id=${u.employeeDbId} AND a.date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY a.date DESC`;return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},attendance:r.rows.map((a:any)=>{const s={date:a.schedule_date||a.date,required_time_in:a.required_time_in,required_time_out:a.required_time_out,break_out:a.schedule_break_out,break_in:a.schedule_break_in,is_working_day:a.is_working_day};const v=attendanceVariance(a,s);return {id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:v.lateMinutes,undertimeMinutes:v.undertimeMinutes,overbreakMinutes:v.overbreakMinutes,varianceMinutes:v.varianceMinutes,totalWorkMinutes:a.time_in&&a.time_out?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:a.status,scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'};})});}
-    if(path==='employee/payroll'&&m==='GET'&&isEmployee(u)){const id=new URL(request.url).searchParams.get('periodId'),p=id?await periodById(id):(await db.sql`SELECT * FROM payroll_periods WHERE status IN('open','for_approval','approved','finalized') ORDER BY start_date DESC LIMIT 1`).rows[0];if(!p)return json({error:'No active payroll period found.'},404);return json(await calculatePayroll(u.employeeDbId,p.id));}
-    if(path==='employee/payroll/approve'&&m==='POST'&&isEmployee(u)){const b=await request.json(),p=await periodById(b.periodId);if(!p)return json({error:'Payroll period not found.'},404);if(p.status!=='for_approval')return json({error:'Payroll is not currently awaiting employee approval.'},400);const now=new Date().toISOString();await db.sql`INSERT INTO payroll_approvals(payroll_period_id,employee_id,approved_at) VALUES(${b.periodId},${u.employeeDbId},${now}) ON CONFLICT(payroll_period_id,employee_id) DO UPDATE SET approved_at=EXCLUDED.approved_at`;return json({success:true,approvedAt:now});}
+    if(path==='employee/payroll-periods'&&m==='GET'&&isEmployee(u)){
+      const periods = await employeePayrollPeriods();
+      return json(periods.map((p:any)=>({
+        id:p.id,
+        name:p.name,
+        startDate:dateOnly(p.startDate),
+        endDate:dateOnly(p.endDate),
+        payoutDate:dateOnly(p.payoutDate),
+        status:p.status
+      })));
+    }
+    if(path==='employee/payroll'&&m==='GET'&&isEmployee(u)){
+      const q=new URL(request.url).searchParams;
+      const requestedId=q.get('periodId');
+      const periods=await employeePayrollPeriods();
+      if(!periods.length)return json({error:'No payroll period found.'},404);
+      const p=requestedId
+        ? periods.find((period:any)=>period.id===requestedId)
+        : periods[0];
+      if(!p)return json({error:'Only the current payroll and the immediately previous payroll are available in the employee portal.'},403);
+      return json(await calculatePayroll(u.employeeDbId,p.id));
+    }
+    if(path==='employee/payroll/approve'&&m==='POST'&&isEmployee(u)){
+      const b=await request.json();
+      const periods=await employeePayrollPeriods();
+      const current=periods[0];
+      if(!current || b.periodId!==current.id)return json({error:'Only the current payroll can be approved from the employee portal.'},403);
+      const p=await periodById(b.periodId);
+      if(!p)return json({error:'Payroll period not found.'},404);
+      if(p.status!=='for_approval')return json({error:'Payroll is not currently awaiting employee approval.'},400);
+      const now=new Date().toISOString();
+      await db.sql`INSERT INTO payroll_approvals(payroll_period_id,employee_id,approved_at) VALUES(${b.periodId},${u.employeeDbId},${now}) ON CONFLICT(payroll_period_id,employee_id) DO UPDATE SET approved_at=EXCLUDED.approved_at`;
+      return json({success:true,approvedAt:now});
+    }
     return json({error:'Not found'},404);
   } catch(e:any) {
     console.error('[CV Log API]',e);

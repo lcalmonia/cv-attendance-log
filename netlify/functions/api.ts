@@ -30,7 +30,7 @@ function minutesBetweenTimes(start: unknown, end: unknown) {
   const sd = asDate(s), ed = asDate(e);
   if (sd && ed) return Math.max(0, Math.round((ed.getTime() - sd.getTime()) / 60000));
   const parts = (v: string) => {
-    const m = v.match(/(\\d{1,2}):(\\d{2})/);
+    const m = v.match(/(\d{1,2}):(\d{2})/);
     return m ? Number(m[1]) * 60 + Number(m[2]) : null;
   };
   const sm = parts(s), em = parts(e);

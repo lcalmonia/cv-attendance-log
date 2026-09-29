@@ -194,14 +194,19 @@ export const IncentiveManagement: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 text-xs space-y-1">
                       <div className="inline-flex items-center px-2 py-0.5 rounded bg-blue-950/50 text-blue-300 mr-1.5 mb-1">{inc.incentiveType === 'attendance' ? 'Attendance Incentive' : 'Other Incentive'}</div>
-                      {inc.requireNoAbsence && (
+                      {inc.incentiveType === 'attendance' && inc.requireNoAbsence && (
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300 mr-1.5">
                           <span>Zero Absences on Duty Days</span>
                         </div>
                       )}
-                      {inc.requireNoLate && (
+                      {inc.incentiveType === 'attendance' && inc.requireNoLate && (
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300">
                           <span>Zero Lateness</span>
+                        </div>
+                      )}
+                      {inc.incentiveType === 'attendance' && inc.requireNoUndertime && (
+                        <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                          <span>Zero Undertime</span>
                         </div>
                       )}
                     </td>

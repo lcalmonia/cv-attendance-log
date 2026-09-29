@@ -123,6 +123,16 @@ function phNow() {
   const get = (t:string) => parts.find(p=>p.type===t)?.value || '';
   return { date:`${get('year')}-${get('month')}-${get('day')}`, minute:Number(get('hour'))*60+Number(get('minute')), iso:new Date().toISOString() };
 }
+function dateOnly(v: unknown) {
+  if (v == null) return '';
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[\\/](\d{1,2})[\\/](\d{4})$/);
+  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
 function dateOk(v: unknown) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')); }
 function timeOk(v: unknown) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')); }
 
@@ -338,7 +348,7 @@ async function handle(request: Request) {
           );
           await client.query(
             'INSERT INTO auth_accounts(user_id,login_id,mobile_login,password_hash,must_change_password,is_active,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-            [userId,loginId,mobileLogin,hashPassword(norm(b.employeeId)),true,status==='active',now,now]
+            [userId,loginId,mobileLogin,hashPassword(String(b.employeeId).trim()),true,status==='active',now,now]
           );
           await client.query(
             'INSERT INTO employees(id,user_id,employee_id,business_id,full_name,mobile_number,email,position,employment_status,date_hired,daily_rate,required_hours_per_day,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
@@ -354,12 +364,26 @@ async function handle(request: Request) {
     if(path.startsWith('admin/employees/')&&path.endsWith('/reset-password')&&m==='POST'&&isAdmin(u)){
       const id=path.split('/')[2], e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404);
       if(String(e.employee_id).trim().length<6)return json({error:'This employee ID is shorter than the required 6-character minimum and cannot be used as a temporary password.'},400);
-      const resetHash=hashPassword(norm(e.employee_id));
+      const resetHash=hashPassword(String(e.employee_id).trim());
       await withTransaction(async (client) => {
         await client.query('UPDATE auth_accounts SET password_hash=$1,must_change_password=true,updated_at=NOW() WHERE user_id=$2',[resetHash,e.user_id]);
         await client.query('UPDATE users SET must_change_password=true WHERE id=$1',[e.user_id]);
       });
       return json({success:true,message:`Password reset to temporary: ${e.employee_id}`});
+    }
+    if(path.startsWith('admin/employees/')&&m==='DELETE'&&isAdmin(u)){
+      const id=path.split('/')[2];
+      const e=await employeeById(id);
+      if(!e)return json({error:'Employee not found.'},404);
+      try{
+        await withTransaction(async (client) => {
+          await client.query('DELETE FROM employees WHERE id=$1',[id]);
+        });
+      }catch(e:any){
+        if(e?.code==='23503')return json({error:'This employee cannot be deleted because related records are still in use.'},409);
+        throw e;
+      }
+      return json({success:true});
     }
     if(path.startsWith('admin/employees/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2]; const e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404); const b=await request.json();
@@ -435,8 +459,8 @@ async function handle(request: Request) {
       const b=await request.json(); if(!b.employeeId||!b.payrollPeriodId||!dateOk(b.date))return json({error:'Employee, payroll period, and valid date are required.'},400);
       const e=await employeeById(b.employeeId), p=await periodById(b.payrollPeriodId); if(!e||!p)return json({error:'Employee or payroll period not found.'},404);
       if(p.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400);
-      const date=String(b.date), start=String(p.start_date).slice(0,10), end=String(p.end_date).slice(0,10);
-      if(date<start||date>end)return json({error:'Schedule date must be inside the selected payroll cut-off.'},400);
+      const date=dateOnly(b.date), start=dateOnly(p.start_date), end=dateOnly(p.end_date);
+      if(!date||!start||!end||date<start||date>end)return json({error:'Schedule date must be inside the selected payroll cut-off.'},400);
       const working=b.isWorkingDay!==false;
       if(working&&(!timeOk(b.requiredTimeIn)||!timeOk(b.requiredTimeOut)||!b.requiredTimeIn||!b.requiredTimeOut))return json({error:'Required time in and time out are required for working days.'},400);
       if((b.breakOut&&!timeOk(b.breakOut))||(b.breakIn&&!timeOk(b.breakIn)))return json({error:'Break times are invalid.'},400);

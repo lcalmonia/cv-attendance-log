@@ -11,6 +11,7 @@ import { AttendanceManagement } from './components/admin/AttendanceManagement';
 import { DeductionManagement } from './components/admin/DeductionManagement';
 import { IncentiveManagement } from './components/admin/IncentiveManagement';
 import { PayrollManagement } from './components/admin/PayrollManagement';
+import { PayrollSettingsManagement } from './components/admin/PayrollSettingsManagement';
 import { EmployeeDashboard } from './components/employee/EmployeeDashboard';
 import { MySchedule } from './components/employee/MySchedule';
 import { MyAttendance } from './components/employee/MyAttendance';
@@ -100,6 +101,7 @@ export default function App() {
             {activeTab === 'deductions' && <DeductionManagement />}
             {activeTab === 'incentives' && <IncentiveManagement />}
             {activeTab === 'payroll' && <PayrollManagement />}
+            {activeTab === 'settings' && <PayrollSettingsManagement />}
           </>
         ) : (
           <>

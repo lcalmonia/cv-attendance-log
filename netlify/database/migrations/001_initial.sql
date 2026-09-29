@@ -89,7 +89,6 @@ CREATE TABLE IF NOT EXISTS schedules (
   break_in TEXT,
   is_working_day BOOLEAN NOT NULL DEFAULT TRUE,
   notes TEXT NOT NULL DEFAULT '',
-  CONSTRAINT schedule_period_date_check CHECK (date >= (SELECT start_date FROM payroll_periods WHERE payroll_periods.id = payroll_period_id) AND date <= (SELECT end_date FROM payroll_periods WHERE payroll_periods.id = payroll_period_id))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS schedules_employee_period_date_unique

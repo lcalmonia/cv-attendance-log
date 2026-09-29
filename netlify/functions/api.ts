@@ -166,8 +166,18 @@ async function calculatePayroll(employeeId:string, periodId:string) {
 
 async function handle(request: Request) {
   const url=new URL(request.url), path=url.pathname.replace(/^\/api\/?/,'').replace(/\/$/,'');
-  const m=request.method.toUpperCase(), u=await currentUser(request);
+  const m=request.method.toUpperCase();
   try {
+    if(path==='health'&&m==='GET'){
+      try{
+        await db.sql\`SELECT 1 AS ok\`;
+        return json({ok:true,database:true});
+      }catch(e:any){
+        console.error('[CV Log API health]',e);
+        return json({ok:false,database:false,error:'Database connection failed.'},503);
+      }
+    }
+    const u=await currentUser(request);
     if(path==='auth/status'&&m==='GET'){
       const r=await db.sql`SELECT EXISTS(SELECT 1 FROM users WHERE role='super_admin' AND status='active') AS ok`;
       return json({hasAccounts:Boolean(r.rows[0]?.ok)});

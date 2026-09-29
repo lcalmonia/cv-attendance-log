@@ -198,7 +198,7 @@ export const MyPayroll: React.FC = () => {
       )}
 
       {/* Approval Banner per Requirement 13 */}
-      {isForApproval && (
+      {isCurrentPayroll && isForApproval && (
         <div className="p-5 rounded-xl bg-blue-950/40 border border-blue-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="font-bold text-white text-base flex items-center gap-2">

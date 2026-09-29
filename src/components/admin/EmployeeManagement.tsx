@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Plus, Edit2, KeyRound, CheckCircle2, XCircle, Search, X, Building2 } from 'lucide-react';
+import { Users, Plus, Edit2, KeyRound, Trash2, CheckCircle2, XCircle, Search, X, Building2 } from 'lucide-react';
 import { Employee, Business, EmploymentStatus, AccountStatus } from '../../types';
 import { api } from '../../services/api';
 
@@ -128,6 +128,21 @@ export const EmployeeManagement: React.FC = () => {
       setSuccessMessage(res.message);
     } catch (err: any) {
       alert(err.message || 'Failed to reset password');
+    }
+  };
+
+  const handleDeleteEmployee = async (emp: Employee) => {
+    const confirmed = confirm(
+      `Delete employee ${emp.fullName} (${emp.employeeId}) permanently?\\n\\nThis will also remove their schedules, attendance records, deductions, payroll approvals, login account, and active sessions. This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await api.admin.deleteEmployee(emp.id);
+      setSuccessMessage(`Deleted employee ${emp.fullName}.`);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete employee');
     }
   };
 
@@ -283,6 +298,13 @@ export const EmployeeManagement: React.FC = () => {
                           title="Edit Employee"
                         >
                           <Edit2 className="w-3.5 h-3.5 text-blue-400" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteEmployee(emp)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-950 text-red-400 hover:text-red-300 transition"
+                          title="Delete Employee"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>

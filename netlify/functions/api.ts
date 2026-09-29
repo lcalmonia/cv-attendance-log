@@ -553,7 +553,7 @@ async function handle(request: Request) {
     return json({error:'Not found'},404);
   } catch(e:any) {
     console.error('[CV Log API]',e);
-    return json({error:e?.message||'Internal server error.'},500);
+    return json({error:'Internal server error.'},500);
   }
 }
 export default async (request: Request) => handle(request);

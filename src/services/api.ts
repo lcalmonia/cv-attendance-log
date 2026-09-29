@@ -114,6 +114,8 @@ export const api = {
       request<Employee>('/api/admin/employees', { method: 'POST', body: JSON.stringify(data) }),
     updateEmployee: (id: string, data: Partial<Employee>) =>
       request<Employee>(`/api/admin/employees/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteEmployee: (id: string) =>
+      request<{ success: boolean }>(`/api/admin/employees/${id}`, { method: 'DELETE' }),
     resetEmployeePassword: (id: string) =>
       request<{ success: boolean; message: string }>(`/api/admin/employees/${id}/reset-password`, { method: 'POST' }),
 

@@ -1,66 +1,75 @@
-# CV Log – Multi-Business Attendance & Payroll System
+# CV Log – Multi-Business Attendance & Payroll
 
-Simple, clean multi-business attendance and payroll web application built for the **CV Group of Companies**.
+CV Log is a simple attendance and payroll web application for multiple businesses.
 
-## Overview
+## Production architecture
 
-CV Log is an intuitive attendance and payroll management portal designed around simplicity and reliability:
-- **Two Roles**: Super Admin and Employee.
-- **Multi-Business Support**: Employees belong to an assigned enterprise (e.g. CV Group of Companies, iLuvKeyks Coffee & Tea, HydraPure Water Refilling Station).
-- **Flexible Scheduling**: Date-by-date schedule assignment per employee before each cut-off (no hard-coded working hours, supports scheduled OFF days).
-- **Live Attendance Logging**: Streamlined clock station supporting Time In, Break Out, Break In, and Time Out with automated lateness and duration calculations.
-- **Configurable Deductions**: Common recurring contributions (SSS, PhilHealth, Pag-IBIG) and employee-specific deductions (Cash advance, uniform, etc.).
-- **Attendance Incentives**: Active performance programs (such as perfect attendance bonuses) evaluated against scheduled duty shifts.
-- **Tentative & Final Payroll**: Real-time tentative payroll projection, formal employee approval workflow, and printable/downloadable payslip vouchers.
-- **Server-Side Security**: Authentication and role-based authorization enforced strictly on all server endpoints.
+- React + Vite frontend
+- Netlify Functions for the API
+- Netlify Database (managed PostgreSQL) for all application data
+- HttpOnly secure session cookie for authentication
+- Responsive UI for desktop and mobile browsers
+- No application data is stored in browser localStorage
 
----
+Schedules and attendance are stored as relational records in Netlify Database. Schedule uniqueness is enforced by employee + payroll period + date. Attendance uniqueness is enforced by employee + date.
 
-## Default Access Credentials
+Attendance timestamps are stored as UTC timestamps, while payroll/schedule date and lateness calculations use Asia/Manila.
 
-- **Super Admin**: `CVG-ADM-001` / `AdminPassword123!`
-- **Employee 1**: `ILK-EMP-101` / `ILK-EMP-101` (Joshua De Leon – iLuvKeyks)
-- **Employee 2**: `HPW-EMP-201` / `HPW-EMP-201` (Maria Elena Santos – HydraPure)
-- **Employee 3**: `HPW-EMP-202` / `HPW-EMP-202` (Rico Bautista – HydraPure)
+## Roles
 
-*Note: Newly registered employees receive a temporary password equal to their Employee ID and are required to set a permanent password upon first login.*
+### Super Admin
+- Create and manage businesses
+- Create and manage employees
+- Assign employees to businesses
+- Create payroll cut-off periods
+- Create date-by-date schedules per employee
+- View attendance logs
+- Configure recurring and employee-specific deductions
+- Configure incentive programs
+- Review payroll
+- Move payroll through approval/finalization statuses
 
----
+### Employee
+- Sign in
+- Change password
+- View today's schedule
+- Time In / Break Out / Break In / Time Out
+- View schedules
+- View attendance
+- View tentative payroll
+- Approve payroll when submitted for approval
+- View/print payslip
 
-## Local Development & Running
+## Netlify deployment
 
-1. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+1. Import the repository into Netlify.
+2. Use build command `npm run build` and publish directory `dist`.
+3. Functions are in `netlify/functions`.
+4. Enable Netlify Database for the site.
+5. Deploy the site. Migrations in `netlify/database/migrations` create the application tables.
+6. On the first visit, the login screen provides the one-time Initialize Super Admin setup when no Super Admin exists.
 
-2. **Start Development Server**:
-   ```bash
-   npm run dev
-   ```
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+The API must use Netlify Database as the authoritative datastore. Do not replace it with files, Blobs, localStorage, or in-memory state.
 
-3. **Production Build**:
-   ```bash
-   npm run build
-   ```
+## Local development
 
-4. **Production Start**:
-   ```bash
-   npm start
-   ```
+Run the complete stack with:
 
----
+```bash
+npm install
+npm run dev
+```
 
-## Deployment Instructions
+For a build/type check:
 
-### Deploy to Netlify / Cloud Hosting
+```bash
+npm run build
+npm run lint
+```
 
-1. **Repository**: Push this repository to GitHub or GitLab.
-2. **Import into Netlify**:
-   - Build Command: `npm run build`
-   - Publish Directory: `dist`
-3. **Environment**:
-   - Ensure Node.js runtime is set to version 20 or 22.
-4. **Data Persistence**:
-   - All accounts, employee assignments, schedules, clock records, deductions, and payroll periods are saved in `.data/cvlog_db.json`.
+## Production notes
+
+- Do not commit real credentials.
+- Do not add demo passwords or demo employee accounts to production data.
+- Employee login credentials are stored as password hashes.
+- Session tokens are kept in an HttpOnly cookie and only their hashes are stored in the database.

@@ -49,13 +49,14 @@ function diffMinutes(start: unknown, end: unknown) {
 function nightDifferentialMinutes(start: string, end: string) {
   const s = new Date(start), e = new Date(end);
   if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e <= s) return 0;
+  const PH_OFFSET_MS = 8 * 60 * 60 * 1000;
   let total = 0;
   const cursor = new Date(s);
   while (cursor < e) {
-    const next = new Date(cursor);
-    next.setMinutes(next.getMinutes() + 1);
-    const hour = cursor.getHours();
-    if (hour >= 22 || hour < 6) total++;
+    const next = new Date(Math.min(cursor.getTime() + 60_000, e.getTime()));
+    const phLocal = new Date(cursor.getTime() + PH_OFFSET_MS);
+    const hour = phLocal.getUTCHours();
+    if (hour >= 22 || hour < 6) total += Math.round((next.getTime() - cursor.getTime()) / 60000);
     cursor.setTime(next.getTime());
   }
   return total;
@@ -146,7 +147,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
-      const worked=normalizedWorkMinutes(a,s), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
+      const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
     const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);

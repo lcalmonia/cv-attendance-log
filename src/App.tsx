@@ -39,7 +39,6 @@ export default function App() {
         setSession(res);
         setAuthState('authenticated');
       } else {
-        clearAuthToken();
         setAuthState('login');
       }
     } catch {

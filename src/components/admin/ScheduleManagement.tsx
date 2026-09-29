@@ -14,7 +14,7 @@ export const ScheduleManagement: React.FC = () => {
   // Schedule Modal
   const [modalOpen, setModalOpen] = useState(false);
   const [formData, setFormData] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }),
     requiredTimeIn: '08:00',
     requiredTimeOut: '17:00',
     breakOut: '12:00',

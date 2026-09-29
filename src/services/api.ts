@@ -144,7 +144,7 @@ export const api = {
       if (params.periodId) q.set('periodId', params.periodId);
       if (params.businessId) q.set('businessId', params.businessId);
       if (params.date) q.set('date', params.date);
-      return request<(AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string })[]>(
+      return request<(AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string; undertimeMinutes: number; overbreakMinutes: number; varianceMinutes: number })[]>(
         `/api/admin/attendance?${q.toString()}`
       );
     },

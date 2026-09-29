@@ -143,7 +143,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
     const present=!!a?.time_in;
     if(present){daysWorked++; late+=Number(a.late_minutes||0);}
-    const dateKey=String(s.date).slice(0,10), nd=present&&a?.time_out?nightDifferentialMinutes(String(a.time_in),String(a.time_out)):0;
+    const dateKey=String(s.date).slice(0,10), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){

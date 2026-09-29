@@ -533,11 +533,95 @@ async function handle(request: Request) {
       const id=path.split('/')[2], s=(await db.sql`SELECT payroll_period_id FROM schedules WHERE id=${id}`).rows[0]; if(s){const p=await periodById(s.payroll_period_id); if(p?.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400); await db.sql`DELETE FROM schedules WHERE id=${id}`;} return json({success:true});
     }
     if(path==='admin/attendance'&&m==='GET'&&isAdmin(u)){
-      const q=new URL(request.url).searchParams,biz=q.get('businessId'),date=q.get('date'),per=q.get('periodId');
-      let sql=`SELECT a.id,a.employee_id AS "employeeId",a.business_id AS "businessId",a.date,a.time_in AS "timeIn",a.break_out AS "breakOut",a.break_in AS "breakIn",a.time_out AS "timeOut",a.late_minutes AS "lateMinutes",a.total_work_minutes AS "totalWorkMinutes",a.status,e.full_name AS "employeeName",e.employee_id AS "employeeIdCode",b.name AS "businessName",s.required_time_in AS "requiredTimeIn",s.required_time_out AS "requiredTimeOut",s.break_out AS "scheduleBreakOut",s.break_in AS "scheduleBreakIn",s.is_working_day AS "isWorkingDay" FROM attendance a JOIN employees e ON e.id=a.employee_id JOIN businesses b ON b.id=a.business_id LEFT JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date WHERE 1=1`, args:any[]=[];
-      if(biz){sql+=` AND a.business_id=$${args.length+1}`;args.push(biz);} if(date){sql+=` AND a.date=$${args.length+1}`;args.push(date);}
-      if(per){const p=await periodById(per);if(p){sql+=` AND a.date BETWEEN ${args.length+1} AND ${args.length+2}`;args.push(dateOnly(p.start_date),dateOnly(p.end_date));sql+=` AND (s.payroll_period_id=${args.length+1} OR s.id IS NULL)`;args.push(per);}}
-      sql+=' ORDER BY a.date DESC,e.full_name'; const r=await db.pool.query(sql,args); return json(r.rows.map((x:any)=>{const s={date:x.date,required_time_in:x.requiredTimeIn,required_time_out:x.requiredTimeOut,break_out:x.scheduleBreakOut,break_in:x.scheduleBreakIn,is_working_day:x.isWorkingDay};const invalid=isInvalidShortDuty(x,s);const v=attendanceVariance(x,s);return {...x,date:dateOnly(x.date),lateMinutes:v.lateMinutes,undertimeMinutes:v.undertimeMinutes,overbreakMinutes:v.overbreakMinutes,varianceMinutes:v.varianceMinutes,totalWorkMinutes:x.timeIn&&x.timeOut?normalizedWorkMinutes(x,s):Number(x.totalWorkMinutes||0),status:invalid?'invalid':x.status};}));
+      const q=new URL(request.url).searchParams;
+      const biz=q.get('businessId');
+      const date=q.get('date');
+      const per=q.get('periodId');
+
+      let sql=`SELECT
+        a.id,
+        a.employee_id AS "employeeId",
+        a.business_id AS "businessId",
+        a.date,
+        a.time_in AS "timeIn",
+        a.break_out AS "breakOut",
+        a.break_in AS "breakIn",
+        a.time_out AS "timeOut",
+        a.late_minutes AS "lateMinutes",
+        a.total_work_minutes AS "totalWorkMinutes",
+        a.status,
+        e.full_name AS "employeeName",
+        e.employee_id AS "employeeIdCode",
+        b.name AS "businessName",
+        s.required_time_in AS "requiredTimeIn",
+        s.required_time_out AS "requiredTimeOut",
+        s.break_out AS "scheduleBreakOut",
+        s.break_in AS "scheduleBreakIn",
+        s.is_working_day AS "isWorkingDay"
+      FROM attendance a
+      JOIN employees e ON e.id=a.employee_id
+      JOIN businesses b ON b.id=a.business_id
+      LEFT JOIN LATERAL (
+        SELECT
+          s.required_time_in,
+          s.required_time_out,
+          s.break_out,
+          s.break_in,
+          s.is_working_day,
+          s.payroll_period_id
+        FROM schedules s
+        JOIN payroll_periods sp ON sp.id=s.payroll_period_id
+        WHERE s.employee_id=a.employee_id
+          AND s.date=a.date
+          AND a.date BETWEEN sp.start_date AND sp.end_date
+        ORDER BY sp.start_date DESC
+        LIMIT 1
+      ) s ON TRUE
+      WHERE 1=1`;
+      const args:any[]=[];
+
+      if(biz){
+        sql+=` AND a.business_id=$${args.length+1}`;
+        args.push(biz);
+      }
+      if(date){
+        sql+=` AND a.date=$${args.length+1}`;
+        args.push(date);
+      }
+      if(per){
+        const p=await periodById(per);
+        if(p){
+          sql+=` AND a.date BETWEEN $${args.length+1} AND $${args.length+2}`;
+          args.push(dateOnly(p.start_date),dateOnly(p.end_date));
+        }
+      }
+
+      sql+=' ORDER BY a.date DESC,e.full_name';
+      const r=await db.pool.query(sql,args);
+      return json(r.rows.map((x:any)=>{
+        const s={
+          date:x.date,
+          required_time_in:x.requiredTimeIn,
+          required_time_out:x.requiredTimeOut,
+          break_out:x.scheduleBreakOut,
+          break_in:x.scheduleBreakIn,
+          is_working_day:x.isWorkingDay
+        };
+        const invalid=isInvalidShortDuty(x,s);
+        const v=attendanceVariance(x,s);
+        return {
+          ...x,
+          date:dateOnly(x.date),
+          lateMinutes:v.lateMinutes,
+          undertimeMinutes:v.undertimeMinutes,
+          overbreakMinutes:v.overbreakMinutes,
+          varianceMinutes:v.varianceMinutes,
+          totalWorkMinutes:x.timeIn&&x.timeOut
+            ? normalizedWorkMinutes(x,s)
+            : Number(x.totalWorkMinutes||0),
+          status:invalid?'invalid':x.status
+        };
+      }));
     }
     if(path==='admin/settings'&&m==='GET'&&isAdmin(u)){
       const biz=new URL(request.url).searchParams.get('businessId')||'all';

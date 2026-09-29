@@ -1,4 +1,5 @@
 import { getDatabase } from '@netlify/database';
+import type { Config } from '@netlify/functions';
 import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 
 const db = getDatabase();
@@ -446,4 +447,4 @@ async function handle(request: Request) {
   }
 }
 export default async (request: Request) => handle(request);
-export const config={path:'/api/*'};
+export const config: Config={path:'/api/*'};

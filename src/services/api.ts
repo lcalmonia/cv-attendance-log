@@ -148,6 +148,8 @@ export const api = {
         `/api/admin/attendance?${q.toString()}`
       );
     },
+    deleteAttendance: (id: string) =>
+      request<{ success: boolean }>(`/api/admin/attendance/${id}`, { method: 'DELETE' }),
 
     // Deductions
     getDeductionTypes: () => request<DeductionType[]>('/api/admin/deductions/types'),

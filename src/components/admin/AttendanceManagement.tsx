@@ -1,253 +1,40 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, Calendar, Building2, Search, Filter, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
-import { AttendanceRecord, Business, PayrollPeriod, AttendanceStatus } from '../../types';
+import { Clock, Search, AlertCircle, CheckCircle2, XCircle, Plus, Edit2, X } from 'lucide-react';
+import { AttendanceRecord, Business, PayrollPeriod, AttendanceStatus, Employee } from '../../types';
 import { api } from '../../services/api';
 
+type Row = AttendanceRecord & { employeeName:string; employeeIdCode:string; businessName:string };
+const empty={employeeId:'',date:'',timeIn:'',breakOut:'',breakIn:'',timeOut:'',lateMinutes:'0',totalWorkMinutes:'0',status:'present'};
+
 export const AttendanceManagement: React.FC = () => {
-  const [records, setRecords] = useState<
-    (AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string })[]
-  >([]);
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [records,setRecords]=useState<Row[]>([]),[businesses,setBusinesses]=useState<Business[]>([]),[periods,setPeriods]=useState<PayrollPeriod[]>([]),[employees,setEmployees]=useState<(Employee & {businessName:string})[]>([]);
+  const [selectedPeriodId,setSelectedPeriodId]=useState('all'),[selectedBusinessId,setSelectedBusinessId]=useState('all'),[selectedDate,setSelectedDate]=useState(''),[search,setSearch]=useState(''),[loading,setLoading]=useState(true);
+  const [modal,setModal]=useState(false),[editId,setEditId]=useState<string|null>(null),[form,setForm]=useState<any>(empty);
 
-  // Filters
-  const [selectedPeriodId, setSelectedPeriodId] = useState('all');
-  const [selectedBusinessId, setSelectedBusinessId] = useState('all');
-  const [selectedDate, setSelectedDate] = useState('');
-  const [search, setSearch] = useState('');
+  const load=async()=>{setLoading(true);try{const [b,p,e,a]=await Promise.all([api.admin.getBusinesses(),api.admin.getPeriods(),api.admin.getEmployees(),api.admin.getAttendance({periodId:selectedPeriodId!=='all'?selectedPeriodId:undefined,businessId:selectedBusinessId!=='all'?selectedBusinessId:undefined,date:selectedDate||undefined})]);setBusinesses(b);setPeriods(p);setEmployees(e);setRecords(a);}finally{setLoading(false);}};
+  useEffect(()=>{load();},[selectedPeriodId,selectedBusinessId,selectedDate]);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [bizList, pList] = await Promise.all([
-        api.admin.getBusinesses(),
-        api.admin.getPeriods(),
-      ]);
-      setBusinesses(bizList);
-      setPeriods(pList);
-
-      const attList = await api.admin.getAttendance({
-        periodId: selectedPeriodId !== 'all' ? selectedPeriodId : undefined,
-        businessId: selectedBusinessId !== 'all' ? selectedBusinessId : undefined,
-        date: selectedDate || undefined,
-      });
-      setRecords(attList);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, [selectedPeriodId, selectedBusinessId, selectedDate]);
-
-  const formatTime = (isoString?: string) => {
-    if (!isoString) return '—';
-    try {
-      const date = new Date(isoString);
-      return date.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true });
-    } catch {
-      return isoString;
-    }
-  };
-
-  const getStatusBadge = (status: AttendanceStatus) => {
-    switch (status) {
-      case 'present':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <CheckCircle2 className="w-3 h-3" /> Present
-          </span>
-        );
-      case 'late':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <Clock className="w-3 h-3" /> Late
-          </span>
-        );
-      case 'absent':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
-            <XCircle className="w-3 h-3" /> Absent
-          </span>
-        );
-      case 'incomplete':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-300">
-            <AlertCircle className="w-3 h-3 text-slate-400" /> Incomplete
-          </span>
-        );
-    }
-  };
-
-  const filtered = records.filter(
-    (r) =>
-      r.employeeName.toLowerCase().includes(search.toLowerCase()) ||
-      r.employeeIdCode.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Attendance Logs</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Real-time and historic clock logs, break durations, and automated lateness calculations.
-          </p>
-        </div>
-      </div>
-
-      {/* Filters Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* Search */}
-        <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Search Employee</label>
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Name or ID…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Business Filter */}
-        <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Business</label>
-          <select
-            value={selectedBusinessId}
-            onChange={(e) => setSelectedBusinessId(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-          >
-            <option value="all">All Businesses</option>
-            {businesses.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Period Filter */}
-        <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Cut-Off Period</label>
-          <select
-            value={selectedPeriodId}
-            onChange={(e) => setSelectedPeriodId(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-          >
-            <option value="all">All Dates</option>
-            {periods.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Specific Date */}
-        <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Specific Date</label>
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
-            />
-            {selectedDate && (
-              <button
-                onClick={() => setSelectedDate('')}
-                className="px-2 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg text-xs"
-                title="Clear date"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Attendance Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-950/80 text-xs font-semibold uppercase text-slate-400 border-b border-slate-800">
-              <tr>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Employee</th>
-                <th className="py-3 px-4">Business</th>
-                <th className="py-3 px-4">Time In</th>
-                <th className="py-3 px-4">Break Window</th>
-                <th className="py-3 px-4">Time Out</th>
-                <th className="py-3 px-4">Lateness</th>
-                <th className="py-3 px-4">Total Hours</th>
-                <th className="py-3 px-4">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/80">
-              {loading ? (
-                <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-500">
-                    Loading attendance entries…
-                  </td>
-                </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-500">
-                    No attendance logs found matching filters.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((att) => (
-                  <tr key={att.id} className="hover:bg-slate-800/40 transition">
-                    <td className="py-3 px-4 font-mono font-medium text-white">{att.date}</td>
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-white">{att.employeeName}</div>
-                      <div className="text-xs font-mono text-slate-400">{att.employeeIdCode}</div>
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-300">{att.businessName}</td>
-                    <td className="py-3 px-4 text-xs font-mono">
-                      <span className={att.timeIn ? 'text-white font-medium' : 'text-slate-500'}>
-                        {formatTime(att.timeIn)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono text-slate-400">
-                      {att.breakOut ? `${formatTime(att.breakOut)} – ${formatTime(att.breakIn)}` : '—'}
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono">
-                      <span className={att.timeOut ? 'text-white font-medium' : 'text-slate-500'}>
-                        {formatTime(att.timeOut)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-xs">
-                      {att.lateMinutes > 0 ? (
-                        <span className="font-semibold text-amber-400">+{att.lateMinutes} mins</span>
-                      ) : (
-                        <span className="text-slate-500">0 min</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-xs font-semibold text-slate-200">
-                      {att.totalWorkMinutes > 0
-                        ? `${(att.totalWorkMinutes / 60).toFixed(1)} hrs`
-                        : '—'}
-                    </td>
-                    <td className="py-3 px-4">{getStatusBadge(att.status)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+  const iso=(v:string)=>v?new Date(v).toISOString():'';
+  const localValue=(v?:string)=>v?new Date(v).toLocaleString('sv-SE',{timeZone:'Asia/Manila'}).replace(' ','T').slice(0,16):'';
+  const save=async(e:React.FormEvent)=>{e.preventDefault();try{const payload={employeeId:form.employeeId,date:form.date,timeIn:form.timeIn?iso(form.timeIn):null,breakOut:form.breakOut?iso(form.breakOut):null,breakIn:form.breakIn?iso(form.breakIn):null,timeOut:form.timeOut?iso(form.timeOut):null,lateMinutes:Number(form.lateMinutes||0),totalWorkMinutes:Number(form.totalWorkMinutes||0),status:form.status};if(editId)await api.admin.updateAttendance(editId,payload);else await api.admin.addAttendance(payload);setModal(false);await load();}catch(err:any){alert(err.message||'Unable to save attendance.')}};
+  const badge=(s:AttendanceStatus)=>s==='present'?<span className="text-emerald-400"><CheckCircle2 className="inline w-3.5 h-3.5"/> Present</span>:s==='late'?<span className="text-amber-400"><Clock className="inline w-3.5 h-3.5"/> Late</span>:s==='absent'?<span className="text-red-400"><XCircle className="inline w-3.5 h-3.5"/> Absent</span>:<span className="text-slate-400"><AlertCircle className="inline w-3.5 h-3.5"/> Incomplete</span>;
+  const filtered=records.filter(r=>r.employeeName.toLowerCase().includes(search.toLowerCase())||r.employeeIdCode.toLowerCase().includes(search.toLowerCase()));
+  const input="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white";
+  return <div className="space-y-6">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"><div><h1 className="text-2xl font-bold text-white">Attendance Logs</h1><p className="text-sm text-slate-400 mt-1">Review, add, and correct employee attendance records.</p></div><button onClick={()=>{setEditId(null);setForm({...empty,employeeId:employees[0]?.id||'',date:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Manila'})});setModal(true)}} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><Plus className="w-4 h-4"/> Add Attendance</button></div>
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div><label className="block text-xs text-slate-400 mb-1">Search Employee</label><div className="relative"><Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5"/><input className={input+" pl-9"} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name or ID"/></div></div>
+      <div><label className="block text-xs text-slate-400 mb-1">Business</label><select className={input} value={selectedBusinessId} onChange={e=>setSelectedBusinessId(e.target.value)}><option value="all">All Businesses</option>{businesses.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
+      <div><label className="block text-xs text-slate-400 mb-1">Cut-Off</label><select className={input} value={selectedPeriodId} onChange={e=>setSelectedPeriodId(e.target.value)}><option value="all">All Dates</option>{periods.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+      <div><label className="block text-xs text-slate-400 mb-1">Date</label><input type="date" className={input} value={selectedDate} onChange={e=>setSelectedDate(e.target.value)}/></div>
     </div>
-  );
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-left text-sm text-slate-300"><thead className="bg-slate-950/80 text-xs uppercase text-slate-400"><tr>{['Date','Employee','Business','Time In','Break','Time Out','Late','Hours','Status',''].map(h=><th key={h} className="py-3 px-4">{h}</th>)}</tr></thead><tbody className="divide-y divide-slate-800/80">{loading?<tr><td colSpan={10} className="py-8 text-center text-slate-500">Loading…</td></tr>:filtered.length===0?<tr><td colSpan={10} className="py-8 text-center text-slate-500">No attendance logs found.</td></tr>:filtered.map(a=><tr key={a.id} className="hover:bg-slate-800/40"><td className="py-3 px-4 font-mono text-white">{a.date}</td><td className="py-3 px-4"><div className="font-semibold text-white">{a.employeeName}</div><div className="text-xs text-slate-500">{a.employeeIdCode}</div></td><td className="py-3 px-4 text-xs">{a.businessName}</td><td className="py-3 px-4 font-mono text-xs">{a.timeIn?new Date(a.timeIn).toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit'}):'—'}</td><td className="py-3 px-4 font-mono text-xs">{a.breakOut?new Date(a.breakOut).toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit'}):'—'}{a.breakIn?' – '+new Date(a.breakIn).toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit'}):''}</td><td className="py-3 px-4 font-mono text-xs">{a.timeOut?new Date(a.timeOut).toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit'}):'—'}</td><td className="py-3 px-4 text-xs">{a.lateMinutes||0} min</td><td className="py-3 px-4 text-xs">{a.totalWorkMinutes?((a.totalWorkMinutes/60).toFixed(1)):'—'}</td><td className="py-3 px-4 text-xs">{badge(a.status)}</td><td className="py-3 px-4 text-right"><button onClick={()=>{setEditId(a.id);setForm({employeeId:a.employeeId,date:a.date,timeIn:localValue(a.timeIn),breakOut:localValue(a.breakOut),breakIn:localValue(a.breakIn),timeOut:localValue(a.timeOut),lateMinutes:String(a.lateMinutes||0),totalWorkMinutes:String(a.totalWorkMinutes||0),status:a.status});setModal(true)}} className="p-2 text-blue-400 hover:text-blue-300"><Edit2 className="w-4 h-4"/></button></td></tr>)}</tbody></table></div></div>
+    {modal&&<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80"><div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-xl shadow-2xl"><div className="flex items-center justify-between p-4 border-b border-slate-800"><h2 className="font-semibold text-white">{editId?'Edit Attendance':'Add Attendance'}</h2><button onClick={()=>setModal(false)}><X className="w-5 h-5 text-slate-400"/></button></div><form onSubmit={save} className="p-4 space-y-3">
+      {!editId&&<div><label className="block text-xs text-slate-400 mb-1">Employee</label><select required className={input} value={form.employeeId} onChange={e=>setForm({...form,employeeId:e.target.value})}>{employees.map(e=><option key={e.id} value={e.id}>{e.fullName} ({e.employeeId})</option>)}</select></div>}
+      <div><label className="block text-xs text-slate-400 mb-1">Duty Date</label><input required type="date" className={input} value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></div>
+      <div className="grid grid-cols-2 gap-3">{[['timeIn','Time In'],['breakOut','Break Out'],['breakIn','Break In'],['timeOut','Time Out']].map(([k,l])=><div key={k}><label className="block text-xs text-slate-400 mb-1">{l}</label><input type="datetime-local" className={input} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></div>)}</div>
+      <div className="grid grid-cols-3 gap-3"><div><label className="block text-xs text-slate-400 mb-1">Late Minutes</label><input type="number" min="0" className={input} value={form.lateMinutes} onChange={e=>setForm({...form,lateMinutes:e.target.value})}/></div><div><label className="block text-xs text-slate-400 mb-1">Work Minutes</label><input type="number" min="0" className={input} value={form.totalWorkMinutes} onChange={e=>setForm({...form,totalWorkMinutes:e.target.value})}/></div><div><label className="block text-xs text-slate-400 mb-1">Status</label><select className={input} value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option value="present">Present</option><option value="late">Late</option><option value="absent">Absent</option><option value="incomplete">Incomplete</option></select></div></div>
+      <div className="flex justify-end gap-2 pt-3 border-t border-slate-800"><button type="button" onClick={()=>setModal(false)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300">Cancel</button><button className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">{editId?'Save Changes':'Add Attendance'}</button></div>
+    </form></div></div>}
+  </div>;
 };

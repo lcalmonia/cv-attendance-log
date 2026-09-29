@@ -70,13 +70,24 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
   const ar=await db.sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY date`;
   const attendance=ar.rows;
-  let daysWorked=0, late=0;
+  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${e.business_id}`;
+  const holidayR=await db.sql`SELECT holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE (business_id=${e.business_id} OR business_id='all') AND holiday_date BETWEEN ${p.start_date} AND ${p.end_date}`;
+  const holidayMap=new Map(holidayR.rows.map((h:any)=>[String(h.holidayDate).slice(0,10),h]));
+  const ndRate=Number(hr.rows[0]?.nightDifferentialHourlyRate||0);
+  let daysWorked=0, late=0, nightDiffMinutes=0, holidayOvertimePay=0;
   const attendanceDays:any[]=[];
   for(const s of duty){
     const a=attendance.find((x:any)=>String(x.date).slice(0,10)===String(s.date).slice(0,10));
     const present=!!a?.time_in;
     if(present){daysWorked++; late+=Number(a.late_minutes||0);}
-    attendanceDays.push({date:String(s.date).slice(0,10),status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(Number(a?.total_work_minutes||0)/60*10)/10});
+    const dateKey=String(s.date).slice(0,10), nd=present&&a?.time_out?nightDifferentialMinutes(String(a.time_in),String(a.time_out)):0;
+    nightDiffMinutes+=nd;
+    const holiday=holidayMap.get(dateKey);
+    if(holiday&&present&&a?.time_out){
+      const worked=Number(a.total_work_minutes||0), scheduled=diffMinutes(s.required_time_in,s.required_time_out), ot=Math.max(0,worked-scheduled);
+      holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
+    }
+    attendanceDays.push({date:dateKey,status:present?a.status:'absent',lateMinutes:Number(a?.late_minutes||0),hours:Math.round(Number(a?.total_work_minutes||0)/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
@@ -92,7 +103,9 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     }
     if(q) incentives.push({name:i.name,amount:Number(i.amount)});
   }
-  const incentivePay=incentives.reduce((n,x)=>n+x.amount,0), gross=Math.round((basic+incentivePay)*100)/100;
+  const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
+  const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
+  const gross=Math.round((basic+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
   const ed=await db.sql`SELECT * FROM employee_deductions WHERE employee_id=${employeeId} AND status='active' AND (recurring=true OR payroll_period_id=${periodId}) ORDER BY deduction_name`;
   const cd=await db.sql`SELECT * FROM deduction_types WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') ORDER BY name`;
   const deductions:any[]=[]; let empD=0, recD=0;
@@ -104,7 +117,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
     employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:Number(e.daily_rate),
-    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,basicPay:basic,incentivePay,employeeDeductionsTotal:empD,
+    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
     finalizedAt:p.status==='finalized'?String(p.payout_date).slice(0,10):undefined,

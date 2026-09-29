@@ -310,12 +310,16 @@ export const ScheduleManagement: React.FC = () => {
                 </tr>
               ) : (
                 schedules.map((s) => {
-                  const dayName = new Date(`${s.date}T12:00:00`).toLocaleDateString('en-US', {
-                    weekday: 'short',
-                  });
+                  const scheduleDate = new Date(`${s.date}T12:00:00`);
+                  const dayName = Number.isNaN(scheduleDate.getTime())
+                    ? '—'
+                    : scheduleDate.toLocaleDateString('en-PH', { weekday: 'long', timeZone: 'Asia/Manila' });
+                  const displayDate = Number.isNaN(scheduleDate.getTime())
+                    ? s.date
+                    : scheduleDate.toLocaleDateString('en-PH', { month: 'short', day: '2-digit', year: 'numeric', timeZone: 'Asia/Manila' });
                   return (
                     <tr key={s.id} className="hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-4 font-mono font-medium text-white">{s.date}</td>
+                      <td className="py-3 px-4 font-medium text-white">{displayDate}</td>
                       <td className="py-3 px-4 text-xs font-semibold text-slate-400">{dayName}</td>
                       <td className="py-3 px-4">
                         <button

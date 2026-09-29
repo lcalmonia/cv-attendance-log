@@ -6,7 +6,7 @@ export type AccountStatus = 'active' | 'inactive';
 
 export type AttendanceAction = 'time_in' | 'break_out' | 'break_in' | 'time_out';
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'incomplete';
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'incomplete' | 'invalid';
 
 export type PayrollStatus = 'open' | 'for_approval' | 'approved' | 'finalized';
 
@@ -82,6 +82,9 @@ export interface AttendanceRecord {
   timeOut?: string; // ISO string
   lateMinutes: number;
   totalWorkMinutes: number;
+  undertimeMinutes?: number;
+  overbreakMinutes?: number;
+  varianceMinutes?: number;
   status: AttendanceStatus;
 }
 
@@ -132,6 +135,8 @@ export interface PayrollRecord {
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;
+  lateDeduction: number;
+  baseDutyPay: number;
   basicPay: number;
   incentivePay: number;
   employeeDeductionsTotal: number;

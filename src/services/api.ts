@@ -114,6 +114,8 @@ export const api = {
       request<Employee>('/api/admin/employees', { method: 'POST', body: JSON.stringify(data) }),
     updateEmployee: (id: string, data: Partial<Employee>) =>
       request<Employee>(`/api/admin/employees/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteEmployee: (id: string) =>
+      request<{ success: boolean }>(`/api/admin/employees/${id}`, { method: 'DELETE' }),
     resetEmployeePassword: (id: string) =>
       request<{ success: boolean; message: string }>(`/api/admin/employees/${id}/reset-password`, { method: 'POST' }),
 
@@ -142,10 +144,12 @@ export const api = {
       if (params.periodId) q.set('periodId', params.periodId);
       if (params.businessId) q.set('businessId', params.businessId);
       if (params.date) q.set('date', params.date);
-      return request<(AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string })[]>(
+      return request<(AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string; undertimeMinutes: number; overbreakMinutes: number; varianceMinutes: number })[]>(
         `/api/admin/attendance?${q.toString()}`
       );
     },
+    deleteAttendance: (id: string) =>
+      request<{ success: boolean }>(`/api/admin/attendance/${id}`, { method: 'DELETE' }),
 
     // Deductions
     getDeductionTypes: () => request<DeductionType[]>('/api/admin/deductions/types'),
@@ -194,6 +198,8 @@ export const api = {
 
   // Employee APIs
   employee: {
+    getPeriods: () => request<PayrollPeriod[]>('/api/employee/periods'),
+    getPayrollPeriods: () => request<PayrollPeriod[]>('/api/employee/payroll-periods'),
     getDashboard: () =>
       request<{
         employeeName: string;

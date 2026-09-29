@@ -4,19 +4,64 @@ import { AttendanceRecord, PayrollPeriod, AttendanceStatus } from '../../types';
 import { api } from '../../services/api';
 
 export const MyAttendance: React.FC = () => {
+  const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
+  const [selectedPeriodId, setSelectedPeriodId] = useState('');
   const [data, setData] = useState<{
     period: PayrollPeriod;
     attendance: (AttendanceRecord & { scheduledTime: string })[];
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const loadAttendance = async (periodId: string) => {
+    if (!periodId) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.employee.getAttendance(periodId);
+      setData(res);
+    } catch (err) {
+      console.error(err);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    api.employee
-      .getAttendance()
-      .then((res) => setData(res))
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
+    const init = async () => {
+      setLoading(true);
+      try {
+        const list = await api.employee.getPeriods();
+        setPeriods(list);
+        const active = list.find((p) => p.status === 'open' || p.status === 'for_approval') || list[0];
+        if (active) {
+          setSelectedPeriodId(active.id);
+          await loadAttendance(active.id);
+        } else {
+          setData(null);
+        }
+      } catch (err) {
+        console.error(err);
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
   }, []);
+
+  useEffect(() => {
+    if (selectedPeriodId) loadAttendance(selectedPeriodId);
+  }, [selectedPeriodId]);
+
+  const formatDate = (date: string) => {
+    const d = new Date(`${date}T12:00:00`);
+    return Number.isNaN(d.getTime())
+      ? date
+      : d.toLocaleDateString('en-PH', { month: 'short', day: '2-digit', year: 'numeric', timeZone: 'Asia/Manila' });
+  };
 
   const formatTime = (isoString?: string) => {
     if (!isoString) return '—';
@@ -47,6 +92,12 @@ export const MyAttendance: React.FC = () => {
             <XCircle className="w-3 h-3" /> Absent
           </span>
         );
+      case 'invalid':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+            <AlertCircle className="w-3 h-3" /> Invalid
+          </span>
+        );
       case 'incomplete':
       default:
         return (
@@ -65,15 +116,27 @@ export const MyAttendance: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">My Attendance Log</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Personal attendance record for the active cut-off period.
+            Personal attendance record for the selected cut-off period.
           </p>
         </div>
-        {data?.period && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
-            <Calendar className="w-4 h-4 text-purple-400" />
-            <span>{data.period.name}</span>
+        <div className="w-full sm:w-auto">
+          <label className="block text-xs font-medium text-slate-400 mb-1">Payroll Cut-Off Period</label>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-purple-400 shrink-0" />
+            <select
+              value={selectedPeriodId}
+              onChange={(e) => setSelectedPeriodId(e.target.value)}
+              className="w-full sm:w-[360px] bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              {periods.length === 0 ? <option value="">No payroll cut-offs available</option> : null}
+              {periods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.startDate} to {p.endDate})
+                </option>
+              ))}
+            </select>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
@@ -86,7 +149,7 @@ export const MyAttendance: React.FC = () => {
                 <th className="py-3 px-4">Time In</th>
                 <th className="py-3 px-4">Break Window</th>
                 <th className="py-3 px-4">Time Out</th>
-                <th className="py-3 px-4">Lateness</th>
+                <th className="py-3 px-4">Late/Undertime/Overbreak</th>
                 <th className="py-3 px-4">Total Hours</th>
                 <th className="py-3 px-4">Status</th>
               </tr>
@@ -107,7 +170,7 @@ export const MyAttendance: React.FC = () => {
               ) : (
                 attendance.map((att) => (
                   <tr key={att.id} className="hover:bg-slate-800/40 transition">
-                    <td className="py-3 px-4 font-mono font-medium text-white">{att.date}</td>
+                    <td className="py-3 px-4 font-medium text-white">{formatDate(att.date)}</td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-300">
                       {att.scheduledTime}
                     </td>
@@ -120,16 +183,16 @@ export const MyAttendance: React.FC = () => {
                     <td className="py-3 px-4 text-xs font-mono font-medium text-white">
                       {formatTime(att.timeOut)}
                     </td>
-                    <td className="py-3 px-4 text-xs">
-                      {att.lateMinutes > 0 ? (
-                        <span className="font-semibold text-amber-400">+{att.lateMinutes} mins</span>
+                    <td className="py-3 px-4 text-xs" title={'Late: '+(att.lateMinutes||0)+' min • Undertime: '+(att.undertimeMinutes||0)+' min • Overbreak: '+(att.overbreakMinutes||0)+' min'}>
+                      {(att.varianceMinutes || 0) > 0 ? (
+                        <span className="font-semibold text-amber-400">+{att.varianceMinutes} mins</span>
                       ) : (
                         <span className="text-slate-500">0 min</span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-200">
                       {att.totalWorkMinutes > 0
-                        ? `${(att.totalWorkMinutes / 60).toFixed(1)} hrs`
+                        ? `${Number(att.totalWorkMinutes / 60).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')} hrs`
                         : '—'}
                     </td>
                     <td className="py-3 px-4">{getStatusBadge(att.status)}</td>

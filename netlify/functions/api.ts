@@ -38,7 +38,7 @@ function minutesBetweenTimes(start: unknown, end: unknown) {
   return Math.max(0, (em - sm + 1440) % 1440);
 }
 function parseHm(v: unknown) {
-  const m = String(v ?? '').match(/^(\\d{1,2}):(\\d{2})$/);
+  const m = String(v ?? '').match(/^(\d{1,2}):(\d{2})$/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
 function diffMinutes(start: unknown, end: unknown) {

@@ -242,35 +242,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => 
               </button>
             </form>
 
-            {/* Quick Demo Credentials for Easy Review */}
-            <div className="mt-6 pt-4 border-t border-slate-800/80">
-              <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                Quick Demo Access
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setDemoLogin('CVG-ADM-001', 'AdminPassword123!')}
-                  className="p-2.5 text-left rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition"
-                >
-                  <div className="font-semibold text-blue-400 flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Super Admin
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">CVG-ADM-001</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDemoLogin('ILK-EMP-101', 'ILK-EMP-101')}
-                  className="p-2.5 text-left rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition"
-                >
-                  <div className="font-semibold text-emerald-400 flex items-center gap-1">
-                    <UserRound className="w-3.5 h-3.5" /> Employee
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">ILK-EMP-101</div>
-                </button>
-              </div>
-            </div>
           </div>
         )}
       </div>

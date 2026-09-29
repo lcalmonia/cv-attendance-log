@@ -15,7 +15,7 @@ import { EmployeeDashboard } from './components/employee/EmployeeDashboard';
 import { MySchedule } from './components/employee/MySchedule';
 import { MyAttendance } from './components/employee/MyAttendance';
 import { MyPayroll } from './components/employee/MyPayroll';
-import { api, getAuthToken, clearAuthToken } from './services/api';
+import { api } from './services/api';
 
 export default function App() {
   const [authState, setAuthState] = useState<'checking' | 'login' | 'authenticated'>('checking');
@@ -33,10 +33,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const checkSession = useCallback(async () => {
-    if (!getAuthToken()) {
-      setAuthState('login');
-      return;
-    }
     try {
       const res = await api.auth.session();
       if (res.authenticated) {
@@ -47,7 +43,6 @@ export default function App() {
         setAuthState('login');
       }
     } catch {
-      clearAuthToken();
       setAuthState('login');
     }
   }, []);
@@ -60,7 +55,6 @@ export default function App() {
     try {
       await api.auth.logout();
     } finally {
-      clearAuthToken();
       setSession(null);
       setAuthState('login');
     }

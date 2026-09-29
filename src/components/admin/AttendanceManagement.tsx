@@ -48,7 +48,7 @@ export const AttendanceManagement: React.FC = () => {
     if (!isoString) return '—';
     try {
       const date = new Date(isoString);
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+      return date.toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true });
     } catch {
       return isoString;
     }

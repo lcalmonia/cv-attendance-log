@@ -1,0 +1,17 @@
+{
+  "name": "CV Log – Attendance & Payroll",
+  "short_name": "CV Log",
+  "description": "Attendance and payroll system for CV Group of Companies.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

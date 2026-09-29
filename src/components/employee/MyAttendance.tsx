@@ -21,11 +21,7 @@ export const MyAttendance: React.FC = () => {
   const formatTime = (isoString?: string) => {
     if (!isoString) return '—';
     try {
-      return new Date(isoString).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
+      return new Date(isoString).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true });
     } catch {
       return isoString;
     }

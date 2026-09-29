@@ -140,9 +140,17 @@ export interface PayrollRecord {
   status: PayrollStatus;
   employeeApprovedAt?: string;
   finalizedAt?: string;
+  nightDifferentialHours?: number;
+  nightDifferentialHourlyRate?: number;
+  nightDifferentialPay?: number;
+  holidayOvertimePay?: number;
   breakdown: {
     incentives: Array<{ name: string; amount: number }>;
     deductions: Array<{ name: string; amount: number; type: 'employee' | 'recurring' }>;
     attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; hours: number }>;
   };
 }
+
+
+export interface Holiday { id:string; businessId:string; holidayDate:string; name:string; holidayType:'regular'|'special_non_working'|'special_working'; overtimeRate:number; }
+export interface PayrollSettings { businessId:string; nightDifferentialHourlyRate:number; holidays:Holiday[]; }

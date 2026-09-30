@@ -602,7 +602,9 @@ async function handle(request: Request) {
               AND a.date BETWEEN sp.start_date AND sp.end_date THEN 0
             ELSE 1
           END,
-          sp.start_date DESC NULLS LAST
+          CASE sp.status WHEN 'open' THEN 0 WHEN 'for_approval' THEN 1 WHEN 'approved' THEN 2 WHEN 'finalized' THEN 3 ELSE 4 END,
+          sp.start_date DESC,
+          s.id DESC
         LIMIT 1
       ) s ON TRUE
       WHERE 1=1`;
@@ -681,7 +683,13 @@ async function handle(request: Request) {
       const iso=(v:any)=>v?new Date(v).toISOString():null;
       const ti=iso(b.timeIn), bo=iso(b.breakOut), bi=iso(b.breakIn), to=iso(b.timeOut);
       if([b.timeIn,b.breakOut,b.breakIn,b.timeOut].some((v:any)=>v && Number.isNaN(new Date(v).getTime())))return json({error:'One or more attendance times are invalid.'},400);
-      const late=Number(b.lateMinutes||0), work=Number(b.totalWorkMinutes||0), status=b.status||((late>0)?'late':(ti?'present':'absent'));
+      const schedule=await resolveScheduleForAttendance(e.id,b.date,b.payrollPeriodId||null);
+      const draft={time_in:ti,break_out:bo,break_in:bi,time_out:to};
+      const metrics=attendanceVariance(draft,schedule);
+      const late=metrics.lateMinutes;
+      const work=ti&&to&&schedule?normalizedWorkMinutes(draft,schedule):0;
+      const invalid=isInvalidShortDuty(draft,schedule);
+      const status=invalid?'present':(ti?(late>0?'late':'present'):'absent');
       const id=b.id||`att_${randomBytes(8).toString('hex')}`;
       await db.sql`INSERT INTO attendance(id,employee_id,business_id,date,time_in,break_out,break_in,time_out,late_minutes,total_work_minutes,status) VALUES(${id},${e.id},${e.business_id},${b.date},${ti},${bo},${bi},${to},${late},${work},${status}) ON CONFLICT(employee_id,date) DO UPDATE SET time_in=EXCLUDED.time_in,break_out=EXCLUDED.break_out,break_in=EXCLUDED.break_in,time_out=EXCLUDED.time_out,late_minutes=EXCLUDED.late_minutes,total_work_minutes=EXCLUDED.total_work_minutes,status=EXCLUDED.status,updated_at=NOW()`;
       return json({success:true,id});
@@ -696,8 +704,15 @@ async function handle(request: Request) {
     if(path.startsWith('admin/attendance/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2], a=(await db.sql`SELECT * FROM attendance WHERE id=${id}`).rows[0]; if(!a)return json({error:'Attendance record not found.'},404);
       const b=await request.json(), iso=(v:any)=>v?new Date(v).toISOString():null;
-      const n={timeIn:b.timeIn!==undefined?iso(b.timeIn):a.time_in,breakOut:b.breakOut!==undefined?iso(b.breakOut):a.break_out,breakIn:b.breakIn!==undefined?iso(b.breakIn):a.break_in,timeOut:b.timeOut!==undefined?iso(b.timeOut):a.time_out,lateMinutes:b.lateMinutes!==undefined?Number(b.lateMinutes):Number(a.late_minutes),totalWorkMinutes:b.totalWorkMinutes!==undefined?Number(b.totalWorkMinutes):Number(a.total_work_minutes),status:b.status??a.status};
-      await db.sql`UPDATE attendance SET time_in=${n.timeIn},break_out=${n.breakOut},break_in=${n.breakIn},time_out=${n.timeOut},late_minutes=${n.lateMinutes},total_work_minutes=${n.totalWorkMinutes},status=${n.status},updated_at=NOW() WHERE id=${id}`;
+      const n={timeIn:b.timeIn!==undefined?iso(b.timeIn):a.time_in,breakOut:b.breakOut!==undefined?iso(b.breakOut):a.break_out,breakIn:b.breakIn!==undefined?iso(b.breakIn):a.break_in,timeOut:b.timeOut!==undefined?iso(b.timeOut):a.time_out};
+      const schedule=await resolveScheduleForAttendance(a.employee_id,a.date,b.payrollPeriodId||null);
+      const draft={time_in:n.timeIn,break_out:n.breakOut,break_in:n.breakIn,time_out:n.timeOut};
+      const metrics=attendanceVariance(draft,schedule);
+      const derivedLate=metrics.lateMinutes;
+      const derivedWork=n.timeIn&&n.timeOut&&schedule?normalizedWorkMinutes(draft,schedule):0;
+      const invalid=isInvalidShortDuty(draft,schedule);
+      const derivedStatus=invalid?'present':(n.timeIn?(derivedLate>0?'late':'present'):'absent');
+      await db.sql`UPDATE attendance SET time_in=${n.timeIn},break_out=${n.breakOut},break_in=${n.breakIn},time_out=${n.timeOut},late_minutes=${derivedLate},total_work_minutes=${derivedWork},status=${derivedStatus},updated_at=NOW() WHERE id=${id}`;
       return json({success:true,id});
     }
     if(path==='admin/deductions/types'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT id,business_id AS "businessId",name,calculation_type AS "calculationType",value,recurring,status FROM deduction_types ORDER BY name`;return json(r.rows.map((x:any)=>({...x,value:Number(x.value)})));}

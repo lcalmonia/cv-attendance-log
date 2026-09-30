@@ -33,7 +33,7 @@ export const MySchedule: React.FC = () => {
         setPeriods(list);
         const active = list.find((p) => p.status === 'open' || p.status === 'for_approval') || list[0];
         setSelectedPeriodId(active?.id || '');
-        if (!active) setData(null);
+        if (!active) setSchedules([]);
       } catch (err) {
         console.error(err);
         setSchedules([]);

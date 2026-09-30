@@ -28,22 +28,15 @@ export const MySchedule: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      setLoading(true);
       try {
         const list = await api.employee.getPeriods();
         setPeriods(list);
         const active = list.find((p) => p.status === 'open' || p.status === 'for_approval') || list[0];
-        if (active) {
-          setSelectedPeriodId(active.id);
-          await loadSchedules(active.id);
-        } else {
-          setSchedules([]);
-        }
+        setSelectedPeriodId(active?.id || '');
+        if (!active) setData(null);
       } catch (err) {
         console.error(err);
         setSchedules([]);
-      } finally {
-        setLoading(false);
       }
     };
     init();
@@ -51,6 +44,7 @@ export const MySchedule: React.FC = () => {
 
   useEffect(() => {
     if (selectedPeriodId) loadSchedules(selectedPeriodId);
+    else setSchedules([]);
   }, [selectedPeriodId]);
 
   const selectedPeriod = periods.find((p) => p.id === selectedPeriodId);

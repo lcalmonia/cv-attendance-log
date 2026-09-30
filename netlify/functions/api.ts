@@ -100,6 +100,22 @@ function scheduleDateTime(date: unknown, hm: unknown, overnightFrom?: unknown) {
   if (overnightFrom && parseHm(time) < parseHm(overnightFrom)) base.setUTCDate(base.getUTCDate() + 1);
   return base;
 }
+async function resolveScheduleForAttendance(employeeId: string, date: unknown, payrollPeriodId?: string | null) {
+  const d=dateOnly(date);
+  if(!d) return null;
+  if(payrollPeriodId){
+    const r=await db.pool.query(
+      'SELECT s.* FROM schedules s JOIN payroll_periods p ON p.id=s.payroll_period_id WHERE s.employee_id=$1 AND s.payroll_period_id=$2 AND s.date=$3 AND s.date BETWEEN p.start_date AND p.end_date LIMIT 1',
+      [employeeId,payrollPeriodId,d]
+    );
+    return r.rows[0]||null;
+  }
+  const r=await db.pool.query(
+    "SELECT s.* FROM schedules s JOIN payroll_periods p ON p.id=s.payroll_period_id WHERE s.employee_id=$1 AND s.date=$2 ORDER BY CASE WHEN s.date BETWEEN p.start_date AND p.end_date THEN 0 ELSE 1 END, CASE p.status WHEN 'open' THEN 0 WHEN 'for_approval' THEN 1 WHEN 'approved' THEN 2 WHEN 'finalized' THEN 3 ELSE 4 END, p.start_date DESC, s.id DESC LIMIT 1",
+    [employeeId,d]
+  );
+  return r.rows[0]||null;
+}
 function attendanceVariance(a: any, s: any) {
   if (!s || !s.is_working_day || isInvalidShortDuty(a, s)) {
     return { lateMinutes: 0, undertimeMinutes: 0, overbreakMinutes: 0, varianceMinutes: 0 };
@@ -119,23 +135,20 @@ function attendanceVariance(a: any, s: any) {
   }
 
   let undertimeMinutes = 0;
-  let varianceMinutes = lateMinutes + overbreakMinutes;
-
-  // The duty requirement is based on actual working minutes, not the wall-clock
-  // span between the scheduled in/out times. The scheduled break is always
-  // treated as taken, even when the employee does not clock a break.
-  if (a?.time_out && s.required_time_in && s.required_time_out) {
-    const scheduledWorkMinutes = Math.max(0, diffMinutes(s.required_time_in, s.required_time_out) - requiredBreak);
-    const actualWorkMinutes = normalizedWorkMinutes(a, s);
-    varianceMinutes = Math.max(0, scheduledWorkMinutes - actualWorkMinutes);
-
-    // Preserve lateness and overbreak as distinct components. Any remaining
-    // work-time deficit is undertime so the three components add exactly to
-    // the total variance without counting the scheduled break as a deficit.
-    undertimeMinutes = Math.max(0, varianceMinutes - lateMinutes - overbreakMinutes);
+  if (a?.time_out && s.required_time_out && s.required_time_in) {
+    const scheduledOut = scheduleDateTime(s.date, s.required_time_out, s.required_time_in);
+    const actualOut = new Date(a.time_out);
+    if (scheduledOut && !Number.isNaN(actualOut.getTime())) {
+      undertimeMinutes = Math.max(0, Math.round((scheduledOut.getTime() - actualOut.getTime()) / 60000));
+    }
   }
 
-  return { lateMinutes, undertimeMinutes, overbreakMinutes, varianceMinutes };
+  return {
+    lateMinutes,
+    undertimeMinutes,
+    overbreakMinutes,
+    varianceMinutes: lateMinutes + undertimeMinutes + overbreakMinutes
+  };
 }
 
 const hashToken = (v: string) => createHash('sha256').update(v).digest('hex');

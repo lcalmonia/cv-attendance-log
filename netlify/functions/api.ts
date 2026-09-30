@@ -239,14 +239,14 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const present=!!a?.time_in && !invalid;
     const metrics=attendanceVariance(a,s);
     if(present){daysWorked++; late+=metrics.lateMinutes;}
-    const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?Math.max(scheduleBreakMinutes(s),nightDifferentialMinutes(String(a.break_out),String(a.break_in))):scheduleBreakMinutes(s))):0;
+    const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
       const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
-    const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
+    const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
     attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
@@ -266,7 +266,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
         if(i.require_no_late&&attendanceVariance(a,s).lateMinutes>0) q=false;
         if(i.require_no_undertime){
           const iv=attendanceVariance(a,s);
-          if(!present || !a?.time_out || iv.undertimeMinutes>0 || iv.overbreakMinutes>0) q=false;
+          if(!present || !a?.time_out || iv.undertimeMinutes>0) q=false;
         }
         if(present && a?.break_out && a?.break_in && minutesBetweenTimes(a.break_out,a.break_in)>scheduleBreakMinutes(s)) q=false;
       }

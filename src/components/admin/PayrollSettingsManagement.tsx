@@ -17,7 +17,7 @@ export const PayrollSettingsManagement: React.FC = () => {
 
   const save=async()=>{await api.admin.updateSettings({businessId,nightDifferentialHourlyRate:Number(rate)});await loadSettings();alert('Payroll settings saved.');};
   const addHoliday=async(e:React.FormEvent)=>{e.preventDefault();await api.admin.createHoliday({...holiday,businessId});setHoliday({holidayDate:'',name:'',holidayType:'regular',overtimeRate:'1.00',businessId});await loadSettings();};
-  const remove=async(id:string)=>{if(!confirm('Delete this holiday?'))return;await api.admin.deleteHoliday(id);await load();};
+  const remove=async(id:string)=>{if(!confirm('Delete this holiday?'))return;await api.admin.deleteHoliday(id);await loadSettings();};
 
   return <div className="space-y-6">
     <div><h1 className="text-2xl font-bold text-white">Payroll Settings</h1><p className="text-sm text-slate-400 mt-1">Configure night differential and holiday overtime rules.</p></div>

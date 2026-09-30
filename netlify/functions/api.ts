@@ -734,7 +734,7 @@ async function handle(request: Request) {
       if(!a){
         const open=(await db.sql`SELECT a.*,s.id AS schedule_id,s.payroll_period_id,s.required_time_in,s.required_time_out,s.break_out AS schedule_break_out,s.break_in AS schedule_break_in,s.is_working_day,s.notes FROM attendance a JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date WHERE a.employee_id=${e.id} AND a.time_in IS NOT NULL AND a.time_out IS NULL AND s.is_working_day=true AND s.required_time_out < s.required_time_in ORDER BY a.date DESC LIMIT 1`).rows[0];
         if(open){a=open;s=(await db.sql`SELECT * FROM schedules WHERE id=${open.schedule_id}`).rows[0];}
-      }return json({employeeName:e.full_name,employeeId:e.employee_id,position:e.position,businessName:biz?.name||'',todaySchedule:s?{id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes}:{isWorkingDay:false,notes:'No schedule assigned'},todayAttendance:a?{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status}:null,currentServerTime:new Date().toISOString()});}
+      }const todayMetrics=attendanceVariance(a,s);const todayInvalid=isInvalidShortDuty(a,s);return json({employeeName:e.full_name,employeeId:e.employee_id,position:e.position,businessName:biz?.name||'',todaySchedule:s?{id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes}:{isWorkingDay:false,notes:'No schedule assigned'},todayAttendance:a?{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:todayMetrics.lateMinutes,totalWorkMinutes:a.time_in&&a.time_out&&s?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:todayInvalid?'invalid':(a.time_in?(todayMetrics.lateMinutes>0?'late':'present'):a.status)}:null,currentServerTime:new Date().toISOString()});}
     if(path==='employee/clock'&&m==='POST'&&isEmployee(u)){
       const e=await employeeById(u.employeeDbId); if(!e)return json({error:'Employee record not found.'},404);
       const b=await request.json(); if(!['time_in','break_out','break_in','time_out'].includes(b.action))return json({error:'Invalid clock action.'},400);
@@ -770,10 +770,13 @@ async function handle(request: Request) {
         if(a.time_out)return json({error:'Already timed out.'},400);
         if(a.break_out&&!a.break_in)return json({error:'Please complete your break before timing out.'},400);
         const work=normalizedWorkMinutes({...a,time_out:ph.iso},s);
-        await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${Number(a.late_minutes||0)>0?'late':'present'},updated_at=NOW() WHERE id=${a.id}`;
+        const finalMetrics=attendanceVariance({...a,time_out:ph.iso},s);
+        await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${finalMetrics.lateMinutes>0?'late':'present'},updated_at=NOW() WHERE id=${a.id}`;
       }
       a=(await db.sql`SELECT * FROM attendance WHERE id=${a.id}`).rows[0];
-      return json({success:true,attendance:{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:Number(a.late_minutes||0),totalWorkMinutes:Number(a.total_work_minutes||0),status:a.status}});
+      const responseMetrics=attendanceVariance(a,s);
+      const responseInvalid=isInvalidShortDuty(a,s);
+      return json({success:true,attendance:{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:responseMetrics.lateMinutes,totalWorkMinutes:a.time_in&&a.time_out&&s?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:responseInvalid?'invalid':a.status}});
     }
     if(path==='employee/periods'&&m==='GET'&&isEmployee(u)){
       const r=await db.sql`SELECT id,name,start_date AS "startDate",end_date AS "endDate",payout_date AS "payoutDate",status FROM payroll_periods ORDER BY start_date DESC`;

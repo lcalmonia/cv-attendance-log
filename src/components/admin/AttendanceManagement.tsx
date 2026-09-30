@@ -11,12 +11,13 @@ export const AttendanceManagement: React.FC = () => {
   const [selectedPeriodId,setSelectedPeriodId]=useState('all'),[selectedBusinessId,setSelectedBusinessId]=useState('all'),[selectedDate,setSelectedDate]=useState(''),[search,setSearch]=useState(''),[loading,setLoading]=useState(true);
   const [modal,setModal]=useState(false),[editId,setEditId]=useState<string|null>(null),[form,setForm]=useState<any>(empty);
 
-  const load=async()=>{setLoading(true);try{const [b,p,e,a]=await Promise.all([api.admin.getBusinesses(),api.admin.getPeriods(),api.admin.getEmployees(),api.admin.getAttendance({periodId:selectedPeriodId!=='all'?selectedPeriodId:undefined,businessId:selectedBusinessId!=='all'?selectedBusinessId:undefined,date:selectedDate||undefined})]);setBusinesses(b);setPeriods(p);setEmployees(e);setRecords(a);}finally{setLoading(false);}};
-  useEffect(()=>{load();},[selectedPeriodId,selectedBusinessId,selectedDate]);
+  const loadAttendance=async()=>{setLoading(true);try{const a=await api.admin.getAttendance({periodId:selectedPeriodId!=='all'?selectedPeriodId:undefined,businessId:selectedBusinessId!=='all'?selectedBusinessId:undefined,date:selectedDate||undefined});setRecords(a);}catch(err){console.error(err);setRecords([]);}finally{setLoading(false);}};
+  useEffect(()=>{Promise.all([api.admin.getBusinesses(),api.admin.getPeriods(),api.admin.getEmployees()]).then(([b,p,e])=>{setBusinesses(b);setPeriods(p);setEmployees(e);}).catch((err)=>console.error(err));},[]);
+  useEffect(()=>{loadAttendance();},[selectedPeriodId,selectedBusinessId,selectedDate]);
 
   const iso=(v:string)=>v?new Date(v).toISOString():'';
   const localValue=(v?:string)=>v?new Date(v).toLocaleString('sv-SE',{timeZone:'Asia/Manila'}).replace(' ','T').slice(0,16):'';
-  const save=async(e:React.FormEvent)=>{e.preventDefault();try{const payload={employeeId:form.employeeId,date:form.date,timeIn:form.timeIn?iso(form.timeIn):null,breakOut:form.breakOut?iso(form.breakOut):null,breakIn:form.breakIn?iso(form.breakIn):null,timeOut:form.timeOut?iso(form.timeOut):null,lateMinutes:Number(form.lateMinutes||0),totalWorkMinutes:Number(form.totalWorkMinutes||0),status:form.status};if(editId)await api.admin.updateAttendance(editId,payload);else await api.admin.addAttendance(payload);setModal(false);await load();}catch(err:any){alert(err.message||'Unable to save attendance.')}};
+  const save=async(e:React.FormEvent)=>{e.preventDefault();try{const payload={employeeId:form.employeeId,date:form.date,timeIn:form.timeIn?iso(form.timeIn):null,breakOut:form.breakOut?iso(form.breakOut):null,breakIn:form.breakIn?iso(form.breakIn):null,timeOut:form.timeOut?iso(form.timeOut):null,lateMinutes:Number(form.lateMinutes||0),totalWorkMinutes:Number(form.totalWorkMinutes||0),status:form.status};if(editId)await api.admin.updateAttendance(editId,payload);else await api.admin.addAttendance(payload);setModal(false);await loadAttendance();}catch(err:any){alert(err.message||'Unable to save attendance.')}};
   const deleteAttendance = async (record: Row) => {
     if (!confirm(`Delete the attendance record for ${record.employeeName} on ${record.date}? This action cannot be undone.`)) return;
     try {

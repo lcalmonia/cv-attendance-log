@@ -237,8 +237,9 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const a=attendance.find((x:any)=>dateOnly(x.date)===dateOnly(s.date));
     const invalid=isInvalidShortDuty(a,s);
     const present=!!a?.time_in && !invalid;
-    if(present){daysWorked++; late+=Number(a.late_minutes||0);}
-    const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
+    const metrics=attendanceVariance(a,s);
+    if(present){daysWorked++; late+=metrics.lateMinutes;}
+    const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?Math.max(scheduleBreakMinutes(s),nightDifferentialMinutes(String(a.break_out),String(a.break_in))):scheduleBreakMinutes(s))):0;
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
@@ -246,7 +247,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
       holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
     }
     const normalizedMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
-    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?a.status:'absent',lateMinutes:present?Number(a?.late_minutes||0):0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
@@ -262,11 +263,10 @@ async function calculatePayroll(employeeId:string, periodId:string) {
         const a=attendance.find((x:any)=>dateOnly(x.date)===dateOnly(s.date));
         const present=!!a?.time_in && !isInvalidShortDuty(a,s);
         if(i.require_no_absence&&!present) q=false;
-        if(i.require_no_late&&Number(a?.late_minutes||0)>0) q=false;
+        if(i.require_no_late&&attendanceVariance(a,s).lateMinutes>0) q=false;
         if(i.require_no_undertime){
-          const scheduledMinutes=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s));
-          const actualMinutes=present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0);
-          if(!present || !a?.time_out || actualMinutes<scheduledMinutes) q=false;
+          const iv=attendanceVariance(a,s);
+          if(!present || !a?.time_out || iv.undertimeMinutes>0 || iv.overbreakMinutes>0) q=false;
         }
         if(present && a?.break_out && a?.break_in && minutesBetweenTimes(a.break_out,a.break_in)>scheduleBreakMinutes(s)) q=false;
       }
@@ -714,7 +714,7 @@ async function handle(request: Request) {
     if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){const id=path.split('/')[2],p=await periodById(id);if(!p)return json({error:'Payroll period not found.'},404);const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;const records=[];for(const e of es)records.push(await calculatePayroll(e.id,id));return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},records});}
     if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);if(!(await periodById(b.periodId)))return json({error:'Payroll period not found.'},404);await db.sql`UPDATE payroll_periods SET status=${b.status} WHERE id=${b.periodId}`;return json({success:true,status:b.status});}
     if(path==='employee/dashboard'&&m==='GET'&&isEmployee(u)){const e=await employeeById(u.employeeDbId),biz=e?(await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`).rows[0]:null;if(!e)return json({error:'Employee record not found.'},404);const today=phNow().date;
-      let s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${today} ORDER BY (CASE WHEN payroll_period_id IN (SELECT id FROM payroll_periods WHERE status='open') THEN 0 ELSE 1 END), id LIMIT 1`).rows[0];
+      let s=await resolveScheduleForAttendance(e.id,today);
       let a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
       if(!a){
         const open=(await db.sql`SELECT a.*,s.id AS schedule_id,s.payroll_period_id,s.required_time_in,s.required_time_out,s.break_out AS schedule_break_out,s.break_in AS schedule_break_in,s.is_working_day,s.notes FROM attendance a JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date WHERE a.employee_id=${e.id} AND a.time_in IS NOT NULL AND a.time_out IS NULL AND s.is_working_day=true AND s.required_time_out < s.required_time_in ORDER BY a.date DESC LIMIT 1`).rows[0];
@@ -726,7 +726,7 @@ async function handle(request: Request) {
       const now=new Date(), ph=phNow(), today=ph.date;
       let s:any=null, a:any=null;
       if(b.action==='time_in'){
-        s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${today} ORDER BY id LIMIT 1`).rows[0];
+        s=await resolveScheduleForAttendance(e.id,today);
         if(!s||!s.is_working_day)return json({error:'No working schedule is assigned for today.'},400);
         a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
       } else {

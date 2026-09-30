@@ -31,22 +31,15 @@ export const MyAttendance: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      setLoading(true);
       try {
         const list = await api.employee.getPeriods();
         setPeriods(list);
         const active = list.find((p) => p.status === 'open' || p.status === 'for_approval') || list[0];
-        if (active) {
-          setSelectedPeriodId(active.id);
-          await loadAttendance(active.id);
-        } else {
-          setData(null);
-        }
+        setSelectedPeriodId(active?.id || '');
+        if (!active) setData(null);
       } catch (err) {
         console.error(err);
         setData(null);
-      } finally {
-        setLoading(false);
       }
     };
     init();
@@ -54,6 +47,7 @@ export const MyAttendance: React.FC = () => {
 
   useEffect(() => {
     if (selectedPeriodId) loadAttendance(selectedPeriodId);
+    else setData(null);
   }, [selectedPeriodId]);
 
   const formatDate = (date: string) => {

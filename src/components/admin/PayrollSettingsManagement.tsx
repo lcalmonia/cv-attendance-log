@@ -11,11 +11,12 @@ export const PayrollSettingsManagement: React.FC = () => {
   const [holiday,setHoliday]=useState({holidayDate:'',name:'',holidayType:'regular',overtimeRate:'1.00',businessId:'all'});
   const [loading,setLoading]=useState(true);
 
-  const load=async()=>{setLoading(true);try{const [b,s]=await Promise.all([api.admin.getBusinesses(),api.admin.getSettings(businessId)]);setBusinesses(b);setSettings(s);setRate(String(s.nightDifferentialHourlyRate));}finally{setLoading(false);}};
-  useEffect(()=>{load();},[businessId]);
+  const loadSettings=async()=>{setLoading(true);try{const s=await api.admin.getSettings(businessId);setSettings(s);setRate(String(s.nightDifferentialHourlyRate));}finally{setLoading(false);}};
+  useEffect(()=>{api.admin.getBusinesses().then(setBusinesses).catch(console.error);},[]);
+  useEffect(()=>{loadSettings();},[businessId]);
 
-  const save=async()=>{await api.admin.updateSettings({businessId,nightDifferentialHourlyRate:Number(rate)});await load();alert('Payroll settings saved.');};
-  const addHoliday=async(e:React.FormEvent)=>{e.preventDefault();await api.admin.createHoliday({...holiday,businessId});setHoliday({holidayDate:'',name:'',holidayType:'regular',overtimeRate:'1.00',businessId});await load();};
+  const save=async()=>{await api.admin.updateSettings({businessId,nightDifferentialHourlyRate:Number(rate)});await loadSettings();alert('Payroll settings saved.');};
+  const addHoliday=async(e:React.FormEvent)=>{e.preventDefault();await api.admin.createHoliday({...holiday,businessId});setHoliday({holidayDate:'',name:'',holidayType:'regular',overtimeRate:'1.00',businessId});await loadSettings();};
   const remove=async(id:string)=>{if(!confirm('Delete this holiday?'))return;await api.admin.deleteHoliday(id);await load();};
 
   return <div className="space-y-6">

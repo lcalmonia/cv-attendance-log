@@ -552,11 +552,9 @@ async function handle(request: Request) {
       const per=q.get('periodId');
       const selectedPeriod=per?await periodById(per):null;
 
-      if(!selectedPeriod){
-        return json([]);
-      }
+      if(!selectedPeriod)return json([]);
 
-      const args:any[]=[selectedPeriod.id,dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date)];
+      const args:any[]=[dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date)];
       let sql=`SELECT
         a.id,
         a.employee_id AS "employeeId",
@@ -572,21 +570,13 @@ async function handle(request: Request) {
         a.payroll_period_id AS "payrollPeriodId",
         e.full_name AS "employeeName",
         e.employee_id AS "employeeIdCode",
-        b.name AS "businessName",
-        s.required_time_in AS "requiredTimeIn",
-        s.required_time_out AS "requiredTimeOut",
-        s.break_out AS "scheduleBreakOut",
-        s.break_in AS "scheduleBreakIn",
-        s.is_working_day AS "isWorkingDay"
+        b.name AS "businessName"
       FROM attendance a
       JOIN employees e ON e.id=a.employee_id
       JOIN businesses b ON b.id=a.business_id
-      LEFT JOIN schedules s
-        ON s.employee_id=a.employee_id
-       AND s.date=a.date
-       AND s.payroll_period_id=$1
-      WHERE a.date BETWEEN $2 AND $3
-        AND (a.payroll_period_id=$1 OR a.payroll_period_id IS NULL)`;
+      WHERE a.date BETWEEN $1 AND $2
+        AND (a.payroll_period_id=$3 OR a.payroll_period_id IS NULL)`;
+      args.push(selectedPeriod.id);
 
       if(biz){
         sql+=` AND a.business_id=$${args.length+1}`;
@@ -596,28 +586,36 @@ async function handle(request: Request) {
         sql+=` AND a.date=$${args.length+1}`;
         args.push(date);
       }
-
       sql+=' ORDER BY a.date DESC,e.full_name';
+
       const r=await db.pool.query(sql,args);
+
+      // Resolve every row against the SELECTED payroll period, not the
+      // attendance row's legacy/nullable period. This is deliberately the
+      // same schedule source used by payroll calculations.
+      const schedules=(await db.pool.query(
+        'SELECT * FROM schedules WHERE payroll_period_id=$1 AND date BETWEEN $2 AND $3',
+        [selectedPeriod.id,dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date)]
+      )).rows;
+      const scheduleMap=new Map(schedules.map((s:any)=>[`${s.employee_id}|${dateOnly(s.date)}`,s]));
+
       return json(r.rows.map((x:any)=>{
-        const s={
-          date:x.date,
-          required_time_in:x.requiredTimeIn,
-          required_time_out:x.requiredTimeOut,
-          break_out:x.scheduleBreakOut,
-          break_in:x.scheduleBreakIn,
-          is_working_day:x.isWorkingDay
-        };
+        const s=scheduleMap.get(`${x.employeeId}|${dateOnly(x.date)}`)||null;
         const invalid=isInvalidShortDuty(x,s);
         const v=attendanceVariance(x,s);
         return {
           ...x,
           date:dateOnly(x.date),
+          requiredTimeIn:s?.required_time_in||undefined,
+          requiredTimeOut:s?.required_time_out||undefined,
+          scheduleBreakOut:s?.break_out||undefined,
+          scheduleBreakIn:s?.break_in||undefined,
+          isWorkingDay:s?.is_working_day===true,
           lateMinutes:v.lateMinutes,
           undertimeMinutes:v.undertimeMinutes,
           overbreakMinutes:v.overbreakMinutes,
           varianceMinutes:v.varianceMinutes,
-          totalWorkMinutes:x.timeIn&&x.timeOut
+          totalWorkMinutes:x.timeIn&&x.timeOut&&s
             ? normalizedWorkMinutes(x,s)
             : Number(x.totalWorkMinutes||0),
           status:invalid?'invalid':x.status

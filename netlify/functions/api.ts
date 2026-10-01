@@ -714,7 +714,7 @@ async function handle(request: Request) {
       const derivedWork=n.timeIn&&n.timeOut&&schedule?normalizedWorkMinutes(draft,schedule):0;
       const invalid=isInvalidShortDuty(draft,schedule);
       const derivedStatus=invalid?'present':(n.timeIn?(derivedLate>0?'late':'present'):'absent');
-      await db.sql`UPDATE attendance SET time_in=${n.timeIn},break_out=${n.breakOut},break_in=${n.breakIn},time_out=${n.timeOut},late_minutes=${derivedLate},total_work_minutes=${derivedWork},status=${derivedStatus},updated_at=NOW() WHERE id=${id}`;
+      await db.sql`UPDATE attendance SET payroll_period_id=${schedule?.payroll_period_id||b.payrollPeriodId||a.payroll_period_id||null},time_in=${n.timeIn},break_out=${n.breakOut},break_in=${n.breakIn},time_out=${n.timeOut},late_minutes=${derivedLate},total_work_minutes=${derivedWork},status=${derivedStatus},updated_at=NOW() WHERE id=${id}`;
       return json({success:true,id});
     }
     if(path==='admin/deductions/types'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT id,business_id AS "businessId",name,calculation_type AS "calculationType",value,recurring,status FROM deduction_types ORDER BY name`;return json(r.rows.map((x:any)=>({...x,value:Number(x.value)})));}

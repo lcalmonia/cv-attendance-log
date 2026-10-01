@@ -75,6 +75,7 @@ export interface AttendanceRecord {
   id: string;
   employeeId: string;
   businessId: string;
+  payrollPeriodId?: string;
   date: string; // YYYY-MM-DD
   timeIn?: string; // ISO string
   breakOut?: string; // ISO string

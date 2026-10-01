@@ -588,10 +588,23 @@ async function handle(request: Request) {
 
       const r=await db.pool.query(sql,args);
       return json(r.rows.map((x:any)=>{
+        // The SELECT aliases are camelCase for the API response, while the
+        // shared attendance calculation functions intentionally consume the
+        // database-shaped snake_case fields. Normalize once before calculating
+        // so Admin and Employee portals use the exact same calculation path.
+        const calculationRow={
+          ...x,
+          time_in:x.timeIn,
+          break_out:x.breakOut,
+          break_in:x.breakIn,
+          time_out:x.timeOut,
+          late_minutes:x.lateMinutes,
+          total_work_minutes:x.totalWorkMinutes
+        };
         const s={date:x.date,required_time_in:x.requiredTimeIn,required_time_out:x.requiredTimeOut,break_out:x.scheduleBreakOut,break_in:x.scheduleBreakIn,is_working_day:x.isWorkingDay};
-        const invalid=isInvalidShortDuty(x,s);
-        const v=attendanceVariance(x,s);
-        return {...x,date:dateOnly(x.date),lateMinutes:v.lateMinutes,undertimeMinutes:v.undertimeMinutes,overbreakMinutes:v.overbreakMinutes,varianceMinutes:v.varianceMinutes,totalWorkMinutes:x.timeIn&&x.timeOut?normalizedWorkMinutes(x,s):Number(x.totalWorkMinutes||0),status:invalid?'invalid':x.status};
+        const invalid=isInvalidShortDuty(calculationRow,s);
+        const v=attendanceVariance(calculationRow,s);
+        return {...x,date:dateOnly(x.date),lateMinutes:v.lateMinutes,undertimeMinutes:v.undertimeMinutes,overbreakMinutes:v.overbreakMinutes,varianceMinutes:v.varianceMinutes,totalWorkMinutes:calculationRow.time_in&&calculationRow.time_out?normalizedWorkMinutes(calculationRow,s):Number(x.totalWorkMinutes||0),status:invalid?'invalid':x.status};
       }));
     }
     if(path==='admin/settings'&&m==='GET'&&isAdmin(u)){

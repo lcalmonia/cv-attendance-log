@@ -557,33 +557,41 @@ async function handle(request: Request) {
       // Never derive the schedule from attendance.payroll_period_id because
       // legacy/imported attendance rows may have a null or stale period id.
       // This keeps Admin attendance calculations aligned with Employee Attendance.
-      const args:any[]=[selectedPeriod.id,dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date)];
-      let sql=`SELECT
-        a.id, a.employee_id AS "employeeId", a.business_id AS "businessId", a.date,
-        a.time_in AS "timeIn", a.break_out AS "breakOut", a.break_in AS "breakIn",
-        a.time_out AS "timeOut", a.late_minutes AS "lateMinutes",
-        a.total_work_minutes AS "totalWorkMinutes", a.status,
-        a.payroll_period_id AS "payrollPeriodId",
-        e.full_name AS "employeeName", e.employee_id AS "employeeIdCode",
-        b.name AS "businessName",
-        s.required_time_in AS "requiredTimeIn", s.required_time_out AS "requiredTimeOut",
-        s.break_out AS "scheduleBreakOut", s.break_in AS "scheduleBreakIn",
-        s.is_working_day AS "isWorkingDay"
-      FROM attendance a
-      JOIN employees e ON e.id=a.employee_id
-      JOIN businesses b ON b.id=a.business_id
-      LEFT JOIN schedules s
-        ON s.employee_id=a.employee_id
-       AND s.date=a.date
-       AND s.payroll_period_id=$1
-      WHERE a.date BETWEEN $2 AND $3
-        AND (a.payroll_period_id=$1 OR a.payroll_period_id IS NULL)`;
+      const r=await db.sql`
+        SELECT
+          a.id,
+          a.employee_id AS "employeeId",
+          a.business_id AS "businessId",
+          a.date,
+          a.time_in AS "timeIn",
+          a.break_out AS "breakOut",
+          a.break_in AS "breakIn",
+          a.time_out AS "timeOut",
+          a.late_minutes AS "lateMinutes",
+          a.total_work_minutes AS "totalWorkMinutes",
+          a.status,
+          a.payroll_period_id AS "payrollPeriodId",
+          e.full_name AS "employeeName",
+          e.employee_id AS "employeeIdCode",
+          b.name AS "businessName",
+          s.required_time_in AS "requiredTimeIn",
+          s.required_time_out AS "requiredTimeOut",
+          s.break_out AS "scheduleBreakOut",
+          s.break_in AS "scheduleBreakIn",
+          s.is_working_day AS "isWorkingDay"
+        FROM attendance a
+        JOIN employees e ON e.id=a.employee_id
+        JOIN businesses b ON b.id=a.business_id
+        LEFT JOIN schedules s
+          ON s.employee_id=a.employee_id
+         AND s.date=a.date
+         AND s.payroll_period_id=${selectedPeriod.id}
+        WHERE a.date BETWEEN ${selectedPeriod.start_date} AND ${selectedPeriod.end_date}
+          AND (a.payroll_period_id=${selectedPeriod.id} OR a.payroll_period_id IS NULL)
+          AND (${biz} IS NULL OR a.business_id=${biz})
+          AND (${date} IS NULL OR a.date=${date})
+        ORDER BY a.date DESC,e.full_name`;
 
-      if(biz){ sql+=` AND a.business_id=$${args.length+1}`; args.push(biz); }
-      if(date){ sql+=` AND a.date=$${args.length+1}`; args.push(date); }
-      sql+=' ORDER BY a.date DESC,e.full_name';
-
-      const r=await db.pool.query(sql,args);
       return json(r.rows.map((x:any)=>{
         const s={
           date:x.date,

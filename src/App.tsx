@@ -1,21 +1,21 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Navbar } from './components/Navbar';
 import { Navigation } from './components/Navigation';
 import { LoginScreen } from './components/LoginScreen';
-import { ChangePasswordScreen } from './components/ChangePasswordScreen';
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { BusinessManagement } from './components/admin/BusinessManagement';
-import { EmployeeManagement } from './components/admin/EmployeeManagement';
-import { ScheduleManagement } from './components/admin/ScheduleManagement';
-import { AttendanceManagement } from './components/admin/AttendanceManagement';
-import { DeductionManagement } from './components/admin/DeductionManagement';
-import { IncentiveManagement } from './components/admin/IncentiveManagement';
-import { PayrollManagement } from './components/admin/PayrollManagement';
-import { PayrollSettingsManagement } from './components/admin/PayrollSettingsManagement';
-import { EmployeeDashboard } from './components/employee/EmployeeDashboard';
-import { MySchedule } from './components/employee/MySchedule';
-import { MyAttendance } from './components/employee/MyAttendance';
-import { MyPayroll } from './components/employee/MyPayroll';
+const ChangePasswordScreen = lazy(() => import('./components/ChangePasswordScreen').then((m) => ({ default: m.ChangePasswordScreen })));
+const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard })));
+const BusinessManagement = lazy(() => import('./components/admin/BusinessManagement').then((m) => ({ default: m.BusinessManagement })));
+const EmployeeManagement = lazy(() => import('./components/admin/EmployeeManagement').then((m) => ({ default: m.EmployeeManagement })));
+const ScheduleManagement = lazy(() => import('./components/admin/ScheduleManagement').then((m) => ({ default: m.ScheduleManagement })));
+const AttendanceManagement = lazy(() => import('./components/admin/AttendanceManagement').then((m) => ({ default: m.AttendanceManagement })));
+const DeductionManagement = lazy(() => import('./components/admin/DeductionManagement').then((m) => ({ default: m.DeductionManagement })));
+const IncentiveManagement = lazy(() => import('./components/admin/IncentiveManagement').then((m) => ({ default: m.IncentiveManagement })));
+const PayrollManagement = lazy(() => import('./components/admin/PayrollManagement').then((m) => ({ default: m.PayrollManagement })));
+const PayrollSettingsManagement = lazy(() => import('./components/admin/PayrollSettingsManagement').then((m) => ({ default: m.PayrollSettingsManagement })));
+const EmployeeDashboard = lazy(() => import('./components/employee/EmployeeDashboard').then((m) => ({ default: m.EmployeeDashboard })));
+const MySchedule = lazy(() => import('./components/employee/MySchedule').then((m) => ({ default: m.MySchedule })));
+const MyAttendance = lazy(() => import('./components/employee/MyAttendance').then((m) => ({ default: m.MyAttendance })));
+const MyPayroll = lazy(() => import('./components/employee/MyPayroll').then((m) => ({ default: m.MyPayroll })));
 import { api } from './services/api';
 
 export default function App() {
@@ -91,6 +91,7 @@ export default function App() {
       <Navigation role={session.role} activeTab={activeTab} setActiveTab={setActiveTab} />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <Suspense fallback={<div className="py-16 text-center text-slate-500">Loading your workspace…</div>}>
         {session.role === 'super_admin' ? (
           <>
             {activeTab === 'dashboard' && <AdminDashboard onNavigate={setActiveTab} />}
@@ -111,6 +112,7 @@ export default function App() {
             {activeTab === 'my-payroll' && <MyPayroll />}
           </>
         )}
+        </Suspense>
       </main>
 
       <footer className="bg-slate-900 border-t border-slate-800/80 py-5 text-xs text-slate-500 print:hidden mt-auto">

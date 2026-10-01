@@ -552,6 +552,11 @@ async function handle(request: Request) {
       const per=q.get('periodId');
       const selectedPeriod=per?await periodById(per):null;
 
+      if(!selectedPeriod){
+        return json([]);
+      }
+
+      const args:any[]=[selectedPeriod.id,dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date)];
       let sql=`SELECT
         a.id,
         a.employee_id AS "employeeId",
@@ -576,40 +581,12 @@ async function handle(request: Request) {
       FROM attendance a
       JOIN employees e ON e.id=a.employee_id
       JOIN businesses b ON b.id=a.business_id
-      LEFT JOIN LATERAL (
-        SELECT
-          s.required_time_in,
-          s.required_time_out,
-          s.break_out,
-          s.break_in,
-          s.is_working_day,
-          s.payroll_period_id,
-          sp.start_date AS period_start
-        FROM schedules s
-        LEFT JOIN payroll_periods sp ON sp.id=s.payroll_period_id
-        WHERE s.employee_id=a.employee_id
-          AND s.date=a.date
-          AND (a.payroll_period_id IS NULL OR s.payroll_period_id=a.payroll_period_id)`;
-      const args:any[]=[];
-
-      if(selectedPeriod){
-        sql+=` AND s.payroll_period_id=$${args.length+1}`;
-        args.push(selectedPeriod.id);
-      }
-
-      sql+=`
-        ORDER BY
-          CASE
-            WHEN sp.start_date IS NOT NULL
-              AND a.date BETWEEN sp.start_date AND sp.end_date THEN 0
-            ELSE 1
-          END,
-          CASE sp.status WHEN 'open' THEN 0 WHEN 'for_approval' THEN 1 WHEN 'approved' THEN 2 WHEN 'finalized' THEN 3 ELSE 4 END,
-          sp.start_date DESC,
-          s.id DESC
-        LIMIT 1
-      ) s ON TRUE
-      WHERE 1=1`;
+      LEFT JOIN schedules s
+        ON s.employee_id=a.employee_id
+       AND s.date=a.date
+       AND s.payroll_period_id=$1
+      WHERE a.date BETWEEN $2 AND $3
+        AND (a.payroll_period_id=$1 OR a.payroll_period_id IS NULL)`;
 
       if(biz){
         sql+=` AND a.business_id=$${args.length+1}`;
@@ -618,10 +595,6 @@ async function handle(request: Request) {
       if(date){
         sql+=` AND a.date=$${args.length+1}`;
         args.push(date);
-      }
-      if(selectedPeriod){
-        sql+=` AND (a.payroll_period_id=${args.length+1} OR (a.payroll_period_id IS NULL AND a.date BETWEEN ${args.length+2} AND ${args.length+3}))`;
-        args.push(selectedPeriod.id,dateOnly(selectedPeriod.start_date),dateOnly(selectedPeriod.end_date));
       }
 
       sql+=' ORDER BY a.date DESC,e.full_name';

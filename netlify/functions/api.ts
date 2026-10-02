@@ -117,7 +117,7 @@ async function resolveScheduleForAttendance(employeeId: string, date: unknown, p
   return r.rows[0]||null;
 }
 function overtimeMinutes(a: any, s: any) {
-  if (!s || !s.is_working_day || !a?.time_out || !s.required_time_out || !s.required_time_in) return 0;
+  if (isInvalidShortDuty(a, s) || !s || !s.is_working_day || !a?.time_out || !s.required_time_out || !s.required_time_in) return 0;
   const scheduledOut = scheduleDateTime(s.date, s.required_time_out, s.required_time_in);
   const actualOut = new Date(a.time_out);
   if (!scheduledOut || Number.isNaN(actualOut.getTime())) return 0;

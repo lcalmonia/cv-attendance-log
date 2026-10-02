@@ -83,7 +83,22 @@ function scheduleBreakMinutes(s: any) {
   return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
 }
 function normalizedWorkMinutes(a: any, s: any) {
-  const elapsed = minutesBetweenTimes(a?.time_in, a?.time_out);
+  if (!a?.time_in || !a?.time_out) return 0;
+
+  // Work time never starts before the employee's scheduled Time In.
+  // Early arrival is not extra worked time; late arrival starts from the
+  // actual Time In. This same calculation is used by both portals and payroll.
+  const actualIn = new Date(a.time_in);
+  const actualOut = new Date(a.time_out);
+  const scheduledIn = s?.date && s?.required_time_in
+    ? scheduleDateTime(s.date, s.required_time_in)
+    : null;
+  if (Number.isNaN(actualIn.getTime()) || Number.isNaN(actualOut.getTime()) || actualOut <= actualIn) return 0;
+
+  const effectiveStart = scheduledIn && !Number.isNaN(scheduledIn.getTime()) && scheduledIn > actualIn
+    ? scheduledIn
+    : actualIn;
+  const elapsed = Math.max(0, Math.round((actualOut.getTime() - effectiveStart.getTime()) / 60000));
   const requiredBreak = scheduleBreakMinutes(s);
   const actualBreak = a?.break_out && a?.break_in ? minutesBetweenTimes(a.break_out, a.break_in) : 0;
   const effectiveBreak = Math.max(requiredBreak, actualBreak);

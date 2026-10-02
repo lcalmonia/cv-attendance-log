@@ -301,8 +301,16 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   }
   const minuteRate=payrollDailyRate/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
+  let overbreak=0, undertime=0;
+  for(const d of attendanceDays){
+    overbreak += Number(d.overbreakMinutes||0);
+    undertime += Number(d.undertimeMinutes||0);
+  }
+  const overbreakDed=Math.round(overbreak*minuteRate*100)/100;
+  const undertimeDed=Math.round(undertime*minuteRate*100)/100;
+  const regularOvertimePay=0;
   const baseDutyPay=Math.round(daysWorked*payrollDailyRate*100)/100;
-  const basic=Math.max(0,Math.round((baseDutyPay-lateDed)*100)/100);
+  const basic=Math.round((baseDutyPay-lateDed-overbreakDed-undertimeDed)*100)/100;
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
   for(const i of incR.rows){
@@ -346,13 +354,13 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
     for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
   }
-  const total=Math.round((lateDed+empD+recD)*100)/100, net=Math.max(0,Math.round((gross-total)*100)/100);
+  const total=Math.round((lateDed+overbreakDed+undertimeDed+empD+recD)*100)/100, net=Math.round((gross-total)*100)/100;
   const appr=await db.sql`SELECT approved_at FROM payroll_approvals WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
     employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:payrollDailyRate,
-    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
+    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overbreakMinutesTotal:overbreak,undertimeMinutesTotal:undertime,lateDeduction:lateDed,overbreakDeduction:overbreakDed,undertimeDeduction:undertimeDed,regularOvertimePay,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
     finalizedAt:p.status==='finalized'?dateOnly(p.payout_date):undefined,

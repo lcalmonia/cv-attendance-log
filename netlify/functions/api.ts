@@ -874,6 +874,7 @@ async function handle(request: Request) {
             overbreakMinutes:v.overbreakMinutes,
             varianceMinutes:v.varianceMinutes,
             overtimeMinutes:overtimeMinutes(a,s),
+            overtimeApprovalStatus:overtimeApprovalStatus(a,s),
             totalWorkMinutes:a.time_in&&a.time_out?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),
             status:invalid?'invalid':a.status,
             scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'

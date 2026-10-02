@@ -144,6 +144,7 @@ export const MyAttendance: React.FC = () => {
                 <th className="py-3 px-4">Break Window</th>
                 <th className="py-3 px-4">Time Out</th>
                 <th className="py-3 px-4">Late/Undertime/Overbreak</th>
+                <th className="py-3 px-4">Overtime</th>
                 <th className="py-3 px-4">Total Hours</th>
                 <th className="py-3 px-4">Status</th>
               </tr>
@@ -151,7 +152,7 @@ export const MyAttendance: React.FC = () => {
             <tbody className="divide-y divide-slate-800/80">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-500">
+                  <td colSpan={9} className="py-8 text-center text-slate-500">
                     Loading your attendance history…
                   </td>
                 </tr>
@@ -183,6 +184,9 @@ export const MyAttendance: React.FC = () => {
                       ) : (
                         <span className="text-slate-500">0 min</span>
                       )}
+                    </td>
+                    <td className="py-3 px-4 text-xs font-semibold text-cyan-400">
+                      {(att.overtimeMinutes || 0) > 0 ? `${att.overtimeMinutes} min` : '—'}
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-200">
                       {att.totalWorkMinutes > 0

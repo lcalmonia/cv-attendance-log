@@ -165,7 +165,7 @@ export interface PayrollRecord {
   overtimeHours?: number;
   pendingOvertimeMinutesTotal?: number;
   breakdown: {
-    incentives: Array<{ name: string; amount: number }>;
+    incentives: Array<{ name: string; amount: number; qualified?: boolean; configuredAmount?: number }>;
     deductions: Array<{ name: string; amount: number; type: 'employee' | 'recurring' }>;
     attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; undertimeMinutes?: number; overbreakMinutes?: number; varianceMinutes?: number; overtimeMinutes?: number; overtimeApprovalStatus?: OvertimeApprovalStatus; pendingOvertimeMinutes?: number; hours: number }>;
   };

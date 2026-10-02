@@ -314,7 +314,7 @@ export const MyPayroll: React.FC = () => {
                 <div key={i} className="flex justify-between items-center py-1 text-emerald-400">
                   <div>
                     <span className="font-medium">{inc.name}</span>
-                    <span className="text-xs text-emerald-500 block">Qualified Attendance Bonus</span>
+                    <span className={`text-xs block ${inc.qualified === false ? 'text-slate-500' : 'text-emerald-500'}`}>{inc.qualified === false ? 'Not Qualified' : 'Qualified'}</span>
                   </div>
                   <span className="font-mono font-semibold">+₱{inc.amount.toLocaleString()}</span>
                 </div>

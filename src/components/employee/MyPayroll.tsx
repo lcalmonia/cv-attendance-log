@@ -334,33 +334,27 @@ export const MyPayroll: React.FC = () => {
           </h2>
 
           <div className="space-y-3 text-sm">
-            {payroll.lateMinutesTotal > 0 && (
-              <div className="flex justify-between items-center py-1 text-amber-400">
-                <div>
-                  <span className="font-medium">Late Deduction</span>
-                  <span className="text-xs text-amber-500/80 block">{payroll.lateMinutesTotal} late minutes</span>
-                </div>
-                <span className="font-mono font-semibold">-₱{payroll.lateDeduction.toLocaleString()}</span>
+            <div className="flex justify-between items-center py-1 text-amber-400">
+              <div>
+                <span className="font-medium">Late Deduction</span>
+                <span className="text-xs text-amber-500/80 block">{payroll.lateMinutesTotal || 0} late minutes</span>
               </div>
-            )}
-            {(payroll.overbreakMinutesTotal || 0) > 0 && (
-              <div className="flex justify-between items-center py-1 text-amber-400">
-                <div>
-                  <span className="font-medium">Overbreak Deduction</span>
-                  <span className="text-xs text-amber-500/80 block">{payroll.overbreakMinutesTotal} overbreak minutes</span>
-                </div>
-                <span className="font-mono font-semibold">-₱{(payroll.overbreakDeduction || 0).toLocaleString()}</span>
+              <span className="font-mono font-semibold">-₱{(payroll.lateDeduction || 0).toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center py-1 text-amber-400">
+              <div>
+                <span className="font-medium">Overbreak Deduction</span>
+                <span className="text-xs text-amber-500/80 block">{payroll.overbreakMinutesTotal || 0} overbreak minutes</span>
               </div>
-            )}
-            {(payroll.undertimeMinutesTotal || 0) > 0 && (
-              <div className="flex justify-between items-center py-1 text-amber-400">
-                <div>
-                  <span className="font-medium">Undertime Deduction</span>
-                  <span className="text-xs text-amber-500/80 block">{payroll.undertimeMinutesTotal} undertime minutes</span>
-                </div>
-                <span className="font-mono font-semibold">-₱{(payroll.undertimeDeduction || 0).toLocaleString()}</span>
+              <span className="font-mono font-semibold">-₱{(payroll.overbreakDeduction || 0).toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center py-1 text-amber-400">
+              <div>
+                <span className="font-medium">Undertime Deduction</span>
+                <span className="text-xs text-amber-500/80 block">{payroll.undertimeMinutesTotal || 0} undertime minutes</span>
               </div>
-            )}
+              <span className="font-mono font-semibold">-₱{(payroll.undertimeDeduction || 0).toLocaleString()}</span>
+            </div>
 
             {payroll.breakdown.deductions.length > 0 ? (
               payroll.breakdown.deductions.map((ded, i) => (

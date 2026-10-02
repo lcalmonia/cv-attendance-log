@@ -116,7 +116,7 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                 </div>
                 {record.breakdown.incentives.map((inc, i) => (
                   <div key={i} className="flex justify-between text-emerald-400 print:text-emerald-700">
-                    <span>{inc.name}</span>
+                    <span>{inc.name}{inc.qualified === false ? ' (Not Qualified)' : ''}</span>
                     <span className="font-mono font-medium">+₱{inc.amount.toLocaleString()}</span>
                   </div>
                 ))}

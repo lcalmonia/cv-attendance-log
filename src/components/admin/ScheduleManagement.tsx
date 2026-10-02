@@ -413,6 +413,23 @@ export const ScheduleManagement: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
                 />
+                <div className="mt-2 rounded-lg bg-blue-500/10 border border-blue-500/20 px-3 py-2 text-xs">
+                  <span className="text-slate-400">Scheduled day: </span>
+                  <span className="font-semibold text-blue-400">
+                    {(() => {
+                      const selectedDate = formData.date ? new Date(`${formData.date}T12:00:00`) : null;
+                      return selectedDate && !Number.isNaN(selectedDate.getTime())
+                        ? selectedDate.toLocaleDateString('en-PH', {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric',
+                            timeZone: 'Asia/Manila',
+                          })
+                        : '—';
+                    })()}
+                  </span>
+                </div>
               </div>
 
               <div>

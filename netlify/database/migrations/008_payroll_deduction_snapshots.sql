@@ -1,3 +1,10 @@
+CREATE TABLE IF NOT EXISTS payroll_deduction_snapshot_headers (
+  payroll_period_id TEXT NOT NULL REFERENCES payroll_periods(id) ON DELETE CASCADE,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (payroll_period_id, employee_id)
+);
+
 CREATE TABLE IF NOT EXISTS payroll_deduction_snapshots (
   id TEXT PRIMARY KEY,
   payroll_period_id TEXT NOT NULL REFERENCES payroll_periods(id) ON DELETE CASCADE,

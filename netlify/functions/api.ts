@@ -820,10 +820,12 @@ async function handle(request: Request) {
       if(!p)return json({error:'Payroll period not found.'},404);
       let records:any[]=[];
       if(p.status==='finalized'){
-        const frozen=(await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
-        const expected=(await db.sql`SELECT COUNT(*)::int AS count FROM employees WHERE status='active'`).rows[0]?.count ?? 0;
-        if(Number(frozen.length)!==Number(expected)){
-          return json({error:'Finalized payroll integrity error: frozen payroll ledger is incomplete. No live recalculation was performed.'},409);
+        const frozen=(await db.sql`SELECT employee_id AS "employeeId", payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
+        const rateSnapshots=(await db.sql`SELECT COUNT(*)::int AS count FROM payroll_rate_snapshots WHERE payroll_period_id=${id}`).rows[0]?.count ?? 0;
+        const deductionHeaders=(await db.sql`SELECT COUNT(*)::int AS count FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${id}`).rows[0]?.count ?? 0;
+        const malformed=frozen.some((row:any)=>!row.employeeId||!row.payrollRecord);
+        if(!frozen.length || malformed || Number(rateSnapshots)!==Number(frozen.length) || Number(deductionHeaders)!==Number(frozen.length)){
+          return json({error:'Finalized payroll integrity error: frozen payroll ledger or snapshots are incomplete. No live recalculation was performed.'},409);
         }
         records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
       } else {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, CheckCircle2, XCircle, Search, X, DollarSign, Percent } from 'lucide-react';
+import { Plus, Edit2, Trash2, CheckCircle2, XCircle, Search, X, DollarSign, Percent, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { DeductionType, EmployeeDeduction, Business, Employee, PayrollPeriod } from '../../types';
 import { api } from '../../services/api';
 
@@ -37,6 +37,115 @@ export const DeductionManagement: React.FC = () => {
   });
 
   const [busy, setBusy] = useState(false);
+
+  type SortDirection = 'asc' | 'desc';
+  type CommonSortKey = 'name' | 'business' | 'calculationType' | 'value' | 'schedule' | 'status';
+  type EmployeeSortKey = 'employee' | 'deductionName' | 'amount' | 'effectiveCutoff' | 'recurrence' | 'status';
+
+  const [commonSort, setCommonSort] = useState<{ key: CommonSortKey; direction: SortDirection }>({
+    key: 'name',
+    direction: 'asc',
+  });
+  const [employeeSort, setEmployeeSort] = useState<{ key: EmployeeSortKey; direction: SortDirection }>({
+    key: 'employee',
+    direction: 'asc',
+  });
+
+  const toggleCommonSort = (key: CommonSortKey) => {
+    setCommonSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const toggleEmployeeSort = (key: EmployeeSortKey) => {
+    setEmployeeSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const SortHeader = ({
+    label,
+    active,
+    direction,
+    onClick,
+  }: {
+    label: string;
+    active: boolean;
+    direction: SortDirection;
+    onClick: () => void;
+  }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-left hover:text-white transition"
+      title={`Sort by ${label}`}
+    >
+      <span>{label}</span>
+      {active ? (
+        direction === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-blue-400" /> : <ArrowDown className="w-3.5 h-3.5 text-blue-400" />
+      ) : (
+        <ArrowUpDown className="w-3.5 h-3.5 text-slate-600" />
+      )}
+    </button>
+  );
+
+  const sortedDeductionTypes = [...deductionTypes].sort((a, b) => {
+    const bizA = businesses.find((x) => x.id === a.businessId)?.name || (a.businessId === 'all' ? 'All Businesses' : 'Assigned Business');
+    const bizB = businesses.find((x) => x.id === b.businessId)?.name || (b.businessId === 'all' ? 'All Businesses' : 'Assigned Business');
+    const values: Record<CommonSortKey, string | number> = {
+      name: a.name,
+      business: bizA,
+      calculationType: a.calculationType === 'fixed' ? 'Fixed Amount' : 'Percentage of Gross',
+      value: Number(a.value),
+      schedule: a.recurring ? 'Every Cut-Off' : 'One-time',
+      status: a.status,
+    };
+    const left = values[commonSort.key];
+    const right = (() => {
+      const valuesB: Record<CommonSortKey, string | number> = {
+        name: b.name,
+        business: bizB,
+        calculationType: b.calculationType === 'fixed' ? 'Fixed Amount' : 'Percentage of Gross',
+        value: Number(b.value),
+        schedule: b.recurring ? 'Every Cut-Off' : 'One-time',
+        status: b.status,
+      };
+      return valuesB[commonSort.key];
+    })();
+    const comparison = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' });
+    return commonSort.direction === 'asc' ? comparison : -comparison;
+  });
+
+  const sortedEmployeeDeductions = [...employeeDeductions].sort((a, b) => {
+    const periodA = periods.find((p) => p.id === a.payrollPeriodId);
+    const periodB = periods.find((p) => p.id === b.payrollPeriodId);
+    const valuesA: Record<EmployeeSortKey, string | number> = {
+      employee: a.employeeName,
+      deductionName: a.deductionName,
+      amount: Number(a.amount),
+      effectiveCutoff: a.recurring ? 'All Periods' : periodA?.name || 'Current',
+      recurrence: a.recurring ? 'Recurring' : 'One-Time',
+      status: a.status,
+    };
+    const valuesB: Record<EmployeeSortKey, string | number> = {
+      employee: b.employeeName,
+      deductionName: b.deductionName,
+      amount: Number(b.amount),
+      effectiveCutoff: b.recurring ? 'All Periods' : periodB?.name || 'Current',
+      recurrence: b.recurring ? 'Recurring' : 'One-Time',
+      status: b.status,
+    };
+    const left = valuesA[employeeSort.key];
+    const right = valuesB[employeeSort.key];
+    const comparison = typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' });
+    return employeeSort.direction === 'asc' ? comparison : -comparison;
+  });
 
   const loadData = async () => {
     setLoading(true);
@@ -240,12 +349,12 @@ export const DeductionManagement: React.FC = () => {
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-950/80 text-xs font-semibold uppercase text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="py-3 px-4">Deduction Name</th>
-                  <th className="py-3 px-4">Applies To</th>
-                  <th className="py-3 px-4">Calculation Mode</th>
-                  <th className="py-3 px-4">Amount / Percentage</th>
-                  <th className="py-3 px-4">Schedule</th>
-                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4"><SortHeader label="Deduction Name" active={commonSort.key === 'name'} direction={commonSort.direction} onClick={() => toggleCommonSort('name')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Applies To" active={commonSort.key === 'business'} direction={commonSort.direction} onClick={() => toggleCommonSort('business')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Calculation Mode" active={commonSort.key === 'calculationType'} direction={commonSort.direction} onClick={() => toggleCommonSort('calculationType')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Amount / Percentage" active={commonSort.key === 'value'} direction={commonSort.direction} onClick={() => toggleCommonSort('value')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Schedule" active={commonSort.key === 'schedule'} direction={commonSort.direction} onClick={() => toggleCommonSort('schedule')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Status" active={commonSort.key === 'status'} direction={commonSort.direction} onClick={() => toggleCommonSort('status')} /></th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -263,7 +372,7 @@ export const DeductionManagement: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  deductionTypes.map((d) => {
+                  sortedDeductionTypes.map((d) => {
                     const biz = businesses.find((b) => b.id === d.businessId);
                     return (
                       <tr key={d.id} className="hover:bg-slate-800/40 transition">
@@ -331,12 +440,12 @@ export const DeductionManagement: React.FC = () => {
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-950/80 text-xs font-semibold uppercase text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="py-3 px-4">Employee</th>
-                  <th className="py-3 px-4">Deduction Reason</th>
-                  <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Effective Cut-Off</th>
-                  <th className="py-3 px-4">Recurrence</th>
-                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4"><SortHeader label="Employee" active={employeeSort.key === 'employee'} direction={employeeSort.direction} onClick={() => toggleEmployeeSort('employee')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Deduction Reason" active={employeeSort.key === 'deductionName'} direction={employeeSort.direction} onClick={() => toggleEmployeeSort('deductionName')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Amount" active={employeeSort.key === 'amount'} direction={employeeSort.direction} onClick={() => toggleEmployeeSort('amount')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Effective Cut-Off" active={employeeSort.key === 'effectiveCutoff'} direction={employeeSort.direction} onClick={() => toggleEmployeeSort('effectiveCutoff')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Recurrence" active={employeeSort.key === 'recurrence'} direction={employeeSort.direction} onClick={() => toggleEmployeeSort('recurrence')} /></th>
+                  <th className="py-3 px-4"><SortHeader label="Status" active={employeeSort.key === 'status'} direction={employeeSort.direction} onClick={() => toggleEmployeeSort('status')} /></th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -354,7 +463,7 @@ export const DeductionManagement: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  employeeDeductions.map((ed) => {
+                  sortedEmployeeDeductions.map((ed) => {
                     const period = periods.find((p) => p.id === ed.payrollPeriodId);
                     return (
                       <tr key={ed.id} className="hover:bg-slate-800/40 transition">

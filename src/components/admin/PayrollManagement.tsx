@@ -251,8 +251,8 @@ export const PayrollManagement: React.FC = () => {
                     <td className="py-3 px-4 font-mono text-rose-400">
                       -₱{r.totalDeductions.toLocaleString()}
                     </td>
-                    <td className="py-3 px-4 font-mono font-bold text-white">
-                      ₱{r.netPay.toLocaleString()}
+                    <td className={`py-3 px-4 font-mono font-bold ${r.netPay < 0 ? 'text-rose-400' : 'text-white'}`}>
+                      {r.netPay < 0 ? '-₱' : '₱'}{Math.abs(r.netPay).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-xs">
                       {r.employeeApprovedAt ? (

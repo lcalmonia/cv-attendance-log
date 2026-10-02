@@ -20,7 +20,6 @@ export const AttendanceManagement: React.FC = () => {
   const timeMinutes=(time:string)=>{const [h,m]=time.split(':').map(Number);return h*60+m;};
   const minutesBetween=(start?:string,end?:string)=>{if(!start||!end)return 0;return Math.max(0,(timeMinutes(end)-timeMinutes(start)+1440)%1440);};
   const scheduleDateTime=(date:string,time?:string,overnightFrom?:string)=>{if(!date||!time)return null;const base=new Date(date+'T'+time+':00+08:00');if(Number.isNaN(base.getTime()))return null;if(overnightFrom&&timeMinutes(time)<timeMinutes(overnightFrom))base.setUTCDate(base.getUTCDate()+1);return base;};
-  const actualDateTimes=buildAttendanceTimes(form.date||'',form);
   const buildAttendanceTimes=(dutyDate:string,values:{timeIn?:string;breakOut?:string;breakIn?:string;timeOut?:string})=>{
     const result:{timeIn:string|null;breakOut:string|null;breakIn:string|null;timeOut:string|null}={timeIn:null,breakOut:null,breakIn:null,timeOut:null};
     let currentDate=dutyDate;
@@ -38,6 +37,7 @@ export const AttendanceManagement: React.FC = () => {
   useEffect(()=>{if(!modal||!selectedPeriodId||!form.employeeId||!form.date){setSchedule(null);return;}api.admin.getSchedules(selectedPeriodId,form.employeeId).then(list=>setSchedule(list.find(s=>s.date===form.date)||null)).catch(()=>setSchedule(null));},[modal,selectedPeriodId,form.employeeId,form.date]);
   const preview=(()=>{
     if(!schedule)return null;
+    const actualDateTimes=buildAttendanceTimes(form.date||'',form);
     const requiredIn=schedule.requiredTimeIn?scheduleDateTime(form.date,schedule.requiredTimeIn):null;
     const requiredOut=schedule.requiredTimeOut?scheduleDateTime(form.date,schedule.requiredTimeOut,schedule.requiredTimeIn):null;
     const actualIn=actualDateTimes.timeIn?new Date(actualDateTimes.timeIn):null;

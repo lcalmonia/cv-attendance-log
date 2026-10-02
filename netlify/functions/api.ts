@@ -321,11 +321,23 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
   const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
-  const ed=await db.sql`SELECT * FROM employee_deductions WHERE employee_id=${employeeId} AND status='active' AND (recurring=true OR payroll_period_id=${periodId}) ORDER BY deduction_name`;
-  const cd=await db.sql`SELECT * FROM deduction_types WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') ORDER BY name`;
+  const deductionSnapshot=p.status==='finalized'
+    ? (await db.sql`SELECT deduction_name AS "deductionName",amount,deduction_type AS "deductionType" FROM payroll_deduction_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId} ORDER BY line_no`).rows
+    : [];
   const deductions:any[]=[]; let empD=0, recD=0;
-  for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
-  for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
+  if(deductionSnapshot.length){
+    for(const d of deductionSnapshot){
+      const a=Number(d.amount);
+      if(d.deductionType==='employee') empD+=a;
+      else if(d.deductionType==='recurring') recD+=a;
+      deductions.push({name:d.deductionName,amount:a,type:d.deductionType});
+    }
+  } else {
+    const ed=await db.sql`SELECT * FROM employee_deductions WHERE employee_id=${employeeId} AND status='active' AND (recurring=true OR payroll_period_id=${periodId}) ORDER BY deduction_name`;
+    const cd=await db.sql`SELECT * FROM deduction_types WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') ORDER BY name`;
+    for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
+    for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
+  }
   const total=Math.round((lateDed+empD+recD)*100)/100, net=Math.max(0,Math.round((gross-total)*100)/100);
   const appr=await db.sql`SELECT approved_at FROM payroll_approvals WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
@@ -760,7 +772,34 @@ async function handle(request: Request) {
     if(path.startsWith('admin/incentives/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[2],i=(await db.sql`SELECT * FROM incentive_programs WHERE id=${id}`).rows[0];if(!i)return json({error:'Incentive not found.'},404);const b=await request.json(),n={name:b.name??i.name,description:b.description??i.description,amount:b.amount!==undefined?Number(b.amount):Number(i.amount),incentiveType:b.incentiveType??i.incentive_type,requireNoLate:b.requireNoLate!==undefined?Boolean(b.requireNoLate):i.require_no_late,requireNoAbsence:b.requireNoAbsence!==undefined?Boolean(b.requireNoAbsence):i.require_no_absence,requireNoUndertime:b.requireNoUndertime!==undefined?Boolean(b.requireNoUndertime):Boolean(i.require_no_undertime),status:b.status??i.status,effectiveDate:b.effectiveDate??String(i.effective_date).slice(0,10)};if(!['attendance','other'].includes(n.incentiveType))return json({error:'Invalid incentive type.'},400);await db.sql`UPDATE incentive_programs SET name=${n.name},description=${n.description},amount=${n.amount},incentive_type=${n.incentiveType},require_no_late=${n.requireNoLate},require_no_absence=${n.requireNoAbsence},require_no_undertime=${n.requireNoUndertime},status=${n.status},effective_date=${n.effectiveDate} WHERE id=${id}`;return json({id,businessId:i.business_id,...n});}
     if(path.startsWith('admin/incentives/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM incentive_programs WHERE id=${path.split('/')[2]}`;return json({success:true});}
     if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){const id=path.split('/')[2],p=await periodById(id);if(!p)return json({error:'Payroll period not found.'},404);const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;const records=[];for(const e of es)records.push(await calculatePayroll(e.id,id));return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},records});}
-    if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);const p=await periodById(b.periodId);if(!p)return json({error:'Payroll period not found.'},404);if(p.status==='finalized'&&b.status!=='finalized')return json({error:'Finalized payroll cannot be reopened.'},400);if(b.status==='finalized'&&p.status!=='finalized'){await db.sql`INSERT INTO payroll_rate_snapshots (id,payroll_period_id,employee_id,daily_rate) SELECT 'rate_'||${p.id}||'_'||id,${p.id},id,daily_rate FROM employees WHERE status='active' ON CONFLICT(payroll_period_id,employee_id) DO NOTHING`;};await db.sql`UPDATE payroll_periods SET status=${b.status} WHERE id=${b.periodId}`;return json({success:true,status:b.status});}
+    if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){
+      const b=await request.json();
+      if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);
+      const p=await periodById(b.periodId);
+      if(!p)return json({error:'Payroll period not found.'},404);
+      if(p.status==='finalized'&&b.status!=='finalized')return json({error:'Finalized payroll cannot be reopened.'},400);
+      if(b.status==='finalized'&&p.status!=='finalized'){
+        const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;
+        const payrollRecords=await Promise.all(es.map((e:any)=>calculatePayroll(e.id,p.id)));
+        await withTransaction(async(client:any)=>{
+          const locked=(await client.query('SELECT status FROM payroll_periods WHERE id=$1 FOR UPDATE',[p.id])).rows[0];
+          if(!locked)throw new Error('Payroll period not found.');
+          if(locked.status==='finalized')throw new Error('Payroll period is already finalized.');
+          for(const r of payrollRecords){
+            await client.query('INSERT INTO payroll_rate_snapshots(id,payroll_period_id,employee_id,daily_rate) VALUES($1,$2,$3,$4) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',['rate_'+p.id+'_'+r.employeeId,p.id,r.employeeId,r.dailyRate]);
+            await client.query('DELETE FROM payroll_deduction_snapshots WHERE payroll_period_id=$1 AND employee_id=$2',[p.id,r.employeeId]);
+            for(let i=0;i<r.breakdown.deductions.length;i++){
+              const d=r.breakdown.deductions[i];
+              await client.query('INSERT INTO payroll_deduction_snapshots(id,payroll_period_id,employee_id,line_no,deduction_name,deduction_type,amount) VALUES($1,$2,$3,$4,$5,$6,$7)',['pds_'+p.id+'_'+r.employeeId+'_'+i,p.id,r.employeeId,i,d.name,d.type,Number(d.amount)]);
+            }
+          }
+          await client.query('UPDATE payroll_periods SET status=$1 WHERE id=$2',['finalized',p.id]);
+        });
+      } else {
+        await db.sql`UPDATE payroll_periods SET status=${b.status} WHERE id=${b.periodId}`;
+      }
+      return json({success:true,status:b.status});
+    }
     if(path==='employee/dashboard'&&m==='GET'&&isEmployee(u)){const e=await employeeById(u.employeeDbId),biz=e?(await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`).rows[0]:null;if(!e)return json({error:'Employee record not found.'},404);const today=phNow().date;
       let a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
       let s=await resolveScheduleForAttendance(e.id,today,a?.payroll_period_id||null);

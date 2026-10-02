@@ -329,7 +329,13 @@ async function calculatePayroll(employeeId:string, periodId:string) {
         if(present && a?.break_out && a?.break_in && minutesBetweenTimes(a.break_out,a.break_in)>scheduleBreakMinutes(s)) q=false;
       }
     }
-    if(q) incentives.push({name:i.name,amount:Number(i.amount),type:i.incentive_type||'attendance'});
+    incentives.push({
+      name:i.name,
+      amount:q ? Number(i.amount) : 0,
+      type:i.incentive_type||'attendance',
+      qualified:q,
+      configuredAmount:Number(i.amount)
+    });
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;

@@ -300,13 +300,21 @@ export const DeductionManagement: React.FC = () => {
                           </button>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => handleDeleteCommon(d.id)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-red-400 transition"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleEditCommon(d)}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 transition"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCommon(d.id)}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-red-400 transition"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -383,7 +391,7 @@ export const DeductionManagement: React.FC = () => {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                          <button
+                            <button
                             onClick={() => handleEditEmpDeduction(ed)}
                             className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 transition"
                             title="Edit"

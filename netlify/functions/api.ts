@@ -288,7 +288,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
       }
     }
     const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
-    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus!=='approved'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus==='pending'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
@@ -643,7 +643,10 @@ async function handle(request: Request) {
           break_in:x.breakIn,
           time_out:x.timeOut,
           late_minutes:x.lateMinutes,
-          total_work_minutes:x.totalWorkMinutes
+          total_work_minutes:x.totalWorkMinutes,
+          overtime_approval_status:x.overtimeApprovalStatus,
+          overtime_reviewed_by:x.overtimeReviewedBy,
+          overtime_reviewed_at:x.overtimeReviewedAt
         };
         const s={date:x.date,required_time_in:x.requiredTimeIn,required_time_out:x.requiredTimeOut,break_out:x.scheduleBreakOut,break_in:x.scheduleBreakIn,is_working_day:x.isWorkingDay};
         const invalid=isInvalidShortDuty(calculationRow,s);
@@ -693,7 +696,9 @@ async function handle(request: Request) {
       const invalid=isInvalidShortDuty(draft,schedule);
       const status=invalid?'present':(ti?(late>0?'late':'present'):'absent');
       const id=b.id||`att_${randomBytes(8).toString('hex')}`;
-      await db.sql`INSERT INTO attendance(id,employee_id,business_id,payroll_period_id,date,time_in,break_out,break_in,time_out,late_minutes,total_work_minutes,status) VALUES(${id},${e.id},${e.business_id},${schedule?.payroll_period_id||b.payrollPeriodId||null},${b.date},${ti},${bo},${bi},${to},${late},${work},${status}) ON CONFLICT(employee_id,date) DO UPDATE SET business_id=EXCLUDED.business_id,payroll_period_id=EXCLUDED.payroll_period_id,time_in=EXCLUDED.time_in,break_out=EXCLUDED.break_out,break_in=EXCLUDED.break_in,time_out=EXCLUDED.time_out,late_minutes=EXCLUDED.late_minutes,total_work_minutes=EXCLUDED.total_work_minutes,status=EXCLUDED.status,updated_at=NOW()`;
+      const draftOvertime=overtimeMinutes(draft,schedule);
+      const approvalStatus=draftOvertime>0?'pending':'not_required';
+      await db.sql`INSERT INTO attendance(id,employee_id,business_id,payroll_period_id,date,time_in,break_out,break_in,time_out,late_minutes,total_work_minutes,status,overtime_approval_status,overtime_reviewed_by,overtime_reviewed_at) VALUES(${id},${e.id},${e.business_id},${schedule?.payroll_period_id||b.payrollPeriodId||null},${b.date},${ti},${bo},${bi},${to},${late},${work},${status},${approvalStatus},NULL,NULL) ON CONFLICT(employee_id,date) DO UPDATE SET business_id=EXCLUDED.business_id,payroll_period_id=EXCLUDED.payroll_period_id,time_in=EXCLUDED.time_in,break_out=EXCLUDED.break_out,break_in=EXCLUDED.break_in,time_out=EXCLUDED.time_out,late_minutes=EXCLUDED.late_minutes,total_work_minutes=EXCLUDED.total_work_minutes,status=EXCLUDED.status,overtime_approval_status=EXCLUDED.overtime_approval_status,overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW()`;
       return json({success:true,id});
     }
     if(path.startsWith('admin/attendance/')&&path.endsWith('/overtime-approval')&&m==='POST'&&isAdmin(u)){

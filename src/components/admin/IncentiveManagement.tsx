@@ -24,21 +24,43 @@ export const IncentiveManagement: React.FC = () => {
   });
 
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [incList, bizList] = await Promise.all([
+      const [incResult, bizResult] = await Promise.allSettled([
         api.admin.getIncentives(),
         api.admin.getBusinesses(),
       ]);
-      setIncentives(incList);
-      setBusinesses(bizList);
-      if (bizList.length > 0 && !formData.businessId) {
-        setFormData((prev) => ({ ...prev, businessId: bizList[0].id }));
+
+      if (incResult.status === 'fulfilled' && Array.isArray(incResult.value)) {
+        setIncentives(incResult.value.filter(Boolean).map((inc: any) => ({
+          ...inc,
+          amount: Number(inc.amount ?? 0),
+        })));
+      } else {
+        setIncentives([]);
+        setLoadError('Unable to load incentive programs. Please refresh and try again.');
+        console.error('Failed to load incentives:', incResult.status === 'rejected' ? incResult.reason : incResult.value);
+      }
+
+      if (bizResult.status === 'fulfilled' && Array.isArray(bizResult.value)) {
+        setBusinesses(bizResult.value.filter(Boolean));
+        if (bizResult.value.length > 0 && !formData.businessId) {
+          setFormData((prev) => ({ ...prev, businessId: bizResult.value[0].id }));
+        }
+      } else {
+        setBusinesses([]);
+        setLoadError((prev) => prev || 'Unable to load businesses. Please refresh and try again.');
+        console.error('Failed to load businesses:', bizResult.status === 'rejected' ? bizResult.reason : bizResult.value);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Unexpected Incentives page error:', err);
+      setIncentives([]);
+      setBusinesses([]);
+      setLoadError('Unable to load this page. Please refresh and try again.');
     } finally {
       setLoading(false);
     }
@@ -152,6 +174,12 @@ export const IncentiveManagement: React.FC = () => {
         </div>
       </div>
 
+      {loadError && (
+        <div className="p-3.5 bg-rose-950/40 border border-rose-900/60 rounded-xl text-sm text-rose-300">
+          {loadError}
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
@@ -192,7 +220,7 @@ export const IncentiveManagement: React.FC = () => {
                       {inc.businessName}
                     </td>
                     <td className="py-3 px-4 font-semibold text-emerald-400">
-                      ₱{inc.amount.toLocaleString()}
+                      ₱{Number(inc.amount ?? 0).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-xs space-y-1">
                       <div className="inline-flex items-center px-2 py-0.5 rounded bg-blue-950/50 text-blue-300 mr-1.5 mb-1">{inc.incentiveType === 'attendance' ? 'Attendance Incentive' : 'Other Incentive'}</div>

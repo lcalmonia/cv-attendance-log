@@ -255,8 +255,8 @@ export const MyPayroll: React.FC = () => {
           <span className="text-xs uppercase font-bold text-blue-400">
             {isTentative ? 'Estimated Net Pay' : 'Total Net Pay'}
           </span>
-          <div className="text-3xl font-black text-emerald-400 mt-1">
-            ₱{payroll.netPay.toLocaleString()}
+          <div className={`text-3xl font-black mt-1 ${payroll.netPay < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+            {payroll.netPay < 0 ? '-₱' : '₱'}{Math.abs(payroll.netPay).toLocaleString()}
           </div>
           <span className="text-xs text-slate-400 mt-1 block">
             Take-home salary after deductions
@@ -285,38 +285,29 @@ export const MyPayroll: React.FC = () => {
               </span>
             </div>
 
-            {(payroll.overtimeHours || 0) > 0 || (payroll.pendingOvertimeMinutesTotal || 0) > 0 ? (
-              <div className="flex justify-between items-center py-1 text-cyan-400">
-                <div>
-                  <span className="font-medium">Overtime</span>
-                  <span className="text-xs text-cyan-500/80 block">
-                    {(payroll.overtimeHours || 0).toFixed(2)} approved hours
-                    {(payroll.pendingOvertimeMinutesTotal || 0) > 0 ? ` • ${payroll.pendingOvertimeMinutesTotal} min pending Super Admin approval` : ''}
-                  </span>
-                </div>
-                <span className="font-mono font-semibold">{(payroll.overtimeHours || 0).toFixed(2)} hrs</span>
+            <div className="flex justify-between items-center py-1 text-cyan-400">
+              <div>
+                <span className="font-medium">Regular Overtime</span>
+                <span className="text-xs text-cyan-500/80 block">{(payroll.overtimeHours || 0).toFixed(2)} approved hours{(payroll.pendingOvertimeMinutesTotal || 0) > 0 ? ` • ${payroll.pendingOvertimeMinutesTotal} min pending Super Admin approval` : ''}</span>
               </div>
-            ) : null}
+              <span className="font-mono font-semibold">+₱{(payroll.regularOvertimePay || 0).toLocaleString()}</span>
+            </div>
 
-            {payroll.holidayOvertimePay ? (
-              <div className="flex justify-between items-center py-1 text-cyan-400">
-                <div>
-                  <span className="font-medium">Overtime Pay</span>
-                  <span className="text-xs text-cyan-500/80 block">Holiday overtime</span>
-                </div>
-                <span className="font-mono font-semibold">+₱{payroll.holidayOvertimePay.toLocaleString()}</span>
+            <div className="flex justify-between items-center py-1 text-cyan-400">
+              <div>
+                <span className="font-medium">Night Differential</span>
+                <span className="text-xs text-cyan-500/80 block">{(payroll.nightDifferentialHours || 0).toFixed(2)} night hours</span>
               </div>
-            ) : null}
+              <span className="font-mono font-semibold">+₱{(payroll.nightDifferentialPay || 0).toLocaleString()}</span>
+            </div>
 
-            {payroll.nightDifferentialPay ? (
-              <div className="flex justify-between items-center py-1 text-cyan-400">
-                <div>
-                  <span className="font-medium">Night Differential</span>
-                  <span className="text-xs text-cyan-500/80 block">{(payroll.nightDifferentialHours || 0).toFixed(2)} night hours</span>
-                </div>
-                <span className="font-mono font-semibold">+₱{payroll.nightDifferentialPay.toLocaleString()}</span>
+            <div className="flex justify-between items-center py-1 text-cyan-400">
+              <div>
+                <span className="font-medium">Holiday Overtime</span>
+                <span className="text-xs text-cyan-500/80 block">Holiday overtime pay</span>
               </div>
-            ) : null}
+              <span className="font-mono font-semibold">+₱{(payroll.holidayOvertimePay || 0).toLocaleString()}</span>
+            </div>
 
             {payroll.breakdown.incentives.length > 0 ? (
               payroll.breakdown.incentives.map((inc, i) => (
@@ -347,11 +338,27 @@ export const MyPayroll: React.FC = () => {
               <div className="flex justify-between items-center py-1 text-amber-400">
                 <div>
                   <span className="font-medium">Late Deduction</span>
-                  <span className="text-xs text-amber-500/80 block">
-                    {payroll.lateMinutesTotal} late minutes
-                  </span>
+                  <span className="text-xs text-amber-500/80 block">{payroll.lateMinutesTotal} late minutes</span>
                 </div>
                 <span className="font-mono font-semibold">-₱{payroll.lateDeduction.toLocaleString()}</span>
+              </div>
+            )}
+            {(payroll.overbreakMinutesTotal || 0) > 0 && (
+              <div className="flex justify-between items-center py-1 text-amber-400">
+                <div>
+                  <span className="font-medium">Overbreak Deduction</span>
+                  <span className="text-xs text-amber-500/80 block">{payroll.overbreakMinutesTotal} overbreak minutes</span>
+                </div>
+                <span className="font-mono font-semibold">-₱{(payroll.overbreakDeduction || 0).toLocaleString()}</span>
+              </div>
+            )}
+            {(payroll.undertimeMinutesTotal || 0) > 0 && (
+              <div className="flex justify-between items-center py-1 text-amber-400">
+                <div>
+                  <span className="font-medium">Undertime Deduction</span>
+                  <span className="text-xs text-amber-500/80 block">{payroll.undertimeMinutesTotal} undertime minutes</span>
+                </div>
+                <span className="font-mono font-semibold">-₱{(payroll.undertimeDeduction || 0).toLocaleString()}</span>
               </div>
             )}
 

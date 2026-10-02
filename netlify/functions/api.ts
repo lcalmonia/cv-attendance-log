@@ -262,7 +262,8 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   if(p.status==='finalized'){
     const frozen=await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
     const record=frozen.rows[0]?.payrollRecord;
-    if(record) return typeof record==='string' ? JSON.parse(record) : record;
+    if(!record) throw new Error('Finalized payroll ledger record is missing. Payroll cannot be recalculated after finalization.');
+    return typeof record==='string' ? JSON.parse(record) : record;
   }
   const sr=await db.sql`SELECT * FROM schedules WHERE employee_id=${employeeId} AND payroll_period_id=${periodId} ORDER BY date`;
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
@@ -820,9 +821,12 @@ async function handle(request: Request) {
       let records:any[]=[];
       if(p.status==='finalized'){
         const frozen=(await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
-        if(frozen.length)records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
-      }
-      if(!records.length){
+        const expected=(await db.sql`SELECT COUNT(*)::int AS count FROM employees WHERE status='active'`).rows[0]?.count ?? 0;
+        if(Number(frozen.length)!==Number(expected)){
+          return json({error:'Finalized payroll integrity error: frozen payroll ledger is incomplete. No live recalculation was performed.'},409);
+        }
+        records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
+      } else {
         const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;
         for(const e of es)records.push(await calculatePayroll(e.id,id));
       }

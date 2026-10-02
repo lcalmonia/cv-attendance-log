@@ -15,9 +15,24 @@ export const AttendanceManagement: React.FC = () => {
   useEffect(()=>{Promise.all([api.admin.getBusinesses(),api.admin.getPeriods(),api.admin.getEmployees()]).then(([b,p,e])=>{setBusinesses(b);setPeriods(p);setEmployees(e);const active=p.find(x=>x.status==='open'||x.status==='for_approval')||p[0];setSelectedPeriodId(active?.id||'');}).catch((err)=>console.error(err));},[]);
   useEffect(()=>{loadAttendance();},[selectedPeriodId,selectedBusinessId,selectedDate]);
 
-  const iso=(v:string)=>v?new Date(v).toISOString():'';
-  const localValue=(v?:string)=>v?new Date(v).toLocaleString('sv-SE',{timeZone:'Asia/Manila'}).replace(' ','T').slice(0,16):'';
-  const save=async(e:React.FormEvent)=>{e.preventDefault();try{const selectedPeriod=periods.find(p=>p.id===selectedPeriodId);if(!selectedPeriod)throw new Error('Please select a payroll cut-off period.');if(!editId&&(form.date<selectedPeriod.startDate||form.date>selectedPeriod.endDate))throw new Error('The attendance date must be within the selected payroll cut-off period.');const payload={employeeId:form.employeeId,date:form.date,payrollPeriodId:selectedPeriodId,timeIn:form.timeIn?iso(form.timeIn):null,breakOut:form.breakOut?iso(form.breakOut):null,breakIn:form.breakIn?iso(form.breakIn):null,timeOut:form.timeOut?iso(form.timeOut):null,lateMinutes:Number(form.lateMinutes||0),totalWorkMinutes:Number(form.totalWorkMinutes||0),status:form.status};if(editId)await api.admin.updateAttendance(editId,payload);else await api.admin.addAttendance(payload);setModal(false);await loadAttendance();}catch(err:any){alert(err.message||'Unable to save attendance.')}};
+  const localValue=(v?:string)=>v?new Date(v).toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit',hour12:false}):'';
+  const addDays=(date:string,days:number)=>{const d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
+  const timeMinutes=(time:string)=>{const [h,m]=time.split(':').map(Number);return h*60+m;};
+  const buildAttendanceTimes=(dutyDate:string,values:{timeIn?:string;breakOut?:string;breakIn?:string;timeOut?:string})=>{
+    const result:{timeIn:string|null;breakOut:string|null;breakIn:string|null;timeOut:string|null}={timeIn:null,breakOut:null,breakIn:null,timeOut:null};
+    let currentDate=dutyDate;
+    let previousMinutes:number|null=null;
+    (['timeIn','breakOut','breakIn','timeOut'] as const).forEach(key=>{
+      const value=values[key];
+      if(!value)return;
+      const minutes=timeMinutes(value);
+      if(previousMinutes!==null&&minutes<previousMinutes)currentDate=addDays(currentDate,1);
+      result[key]=new Date(currentDate+'T'+value+':00+08:00').toISOString();
+      previousMinutes=minutes;
+    });
+    return result;
+  };
+  const save=async(e:React.FormEvent)=>{e.preventDefault();try{const selectedPeriod=periods.find(p=>p.id===selectedPeriodId);if(!selectedPeriod)throw new Error('Please select a payroll cut-off period.');if(!editId&&(form.date<selectedPeriod.startDate||form.date>selectedPeriod.endDate))throw new Error('The attendance date must be within the selected payroll cut-off period.');const times=buildAttendanceTimes(form.date,form);const payload={employeeId:form.employeeId,date:form.date,payrollPeriodId:selectedPeriodId,...times,lateMinutes:Number(form.lateMinutes||0),totalWorkMinutes:Number(form.totalWorkMinutes||0),status:form.status};if(editId)await api.admin.updateAttendance(editId,payload);else await api.admin.addAttendance(payload);setModal(false);await loadAttendance();}catch(err:any){alert(err.message||'Unable to save attendance.')}};
   const deleteAttendance = async (record: Row) => {
     if (!confirm(`Delete the attendance record for ${record.employeeName} on ${record.date}? This action cannot be undone.`)) return;
     try {
@@ -42,7 +57,7 @@ export const AttendanceManagement: React.FC = () => {
     {modal&&<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80"><div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-xl shadow-2xl"><div className="flex items-center justify-between p-4 border-b border-slate-800"><h2 className="font-semibold text-white">{editId?'Edit Attendance':'Add Attendance'}</h2><button onClick={()=>setModal(false)}><X className="w-5 h-5 text-slate-400"/></button></div><form onSubmit={save} className="p-4 space-y-3">
       {!editId&&<div><label className="block text-xs text-slate-400 mb-1">Employee</label><select required className={input} value={form.employeeId} onChange={e=>setForm({...form,employeeId:e.target.value})}>{employees.map(e=><option key={e.id} value={e.id}>{e.fullName} ({e.employeeId})</option>)}</select></div>}
       <div><label className="block text-xs text-slate-400 mb-1">Duty Date</label><input required type="date" className={input} value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></div>
-      <div className="grid grid-cols-2 gap-3">{[['timeIn','Time In'],['breakOut','Break Out'],['breakIn','Break In'],['timeOut','Time Out']].map(([k,l])=><div key={k}><label className="block text-xs text-slate-400 mb-1">{l}</label><input type="datetime-local" className={input} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></div>)}</div>
+      <div className="grid grid-cols-2 gap-3">{[['timeIn','Time In'],['breakOut','Break Out'],['breakIn','Break In'],['timeOut','Time Out']].map(([k,l])=><div key={k}><label className="block text-xs text-slate-400 mb-1">{l}</label><input type="time" className={input} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></div>)}</div>
       <div className="grid grid-cols-3 gap-3"><div><label className="block text-xs text-slate-400 mb-1">Late Minutes</label><input type="number" min="0" className={input} value={form.lateMinutes} onChange={e=>setForm({...form,lateMinutes:e.target.value})}/></div><div><label className="block text-xs text-slate-400 mb-1">Work Minutes</label><input type="number" min="0" className={input} value={form.totalWorkMinutes} onChange={e=>setForm({...form,totalWorkMinutes:e.target.value})}/></div><div><label className="block text-xs text-slate-400 mb-1">Status</label><select className={input} value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option value="present">Present</option><option value="late">Late</option><option value="absent">Absent</option><option value="incomplete">Incomplete</option></select></div></div>
       <div className="flex justify-end gap-2 pt-3 border-t border-slate-800"><button type="button" onClick={()=>setModal(false)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300">Cancel</button><button className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">{editId?'Save Changes':'Add Attendance'}</button></div>
     </form></div></div>}

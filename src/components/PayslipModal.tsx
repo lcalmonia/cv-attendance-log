@@ -102,8 +102,18 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                   </span>
                 </div>
 
-                {record.holidayOvertimePay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Overtime Pay (Holiday OT)</span><span className="font-mono font-medium">+₱{record.holidayOvertimePay.toLocaleString()}</span></div> : null}
-                {record.nightDifferentialPay ? <div className="flex justify-between text-cyan-400 print:text-cyan-700"><span>Night Differential ({(record.nightDifferentialHours||0).toFixed(1)} hrs)</span><span className="font-mono font-medium">+₱{record.nightDifferentialPay.toLocaleString()}</span></div> : null}
+                <div className="flex justify-between text-cyan-400 print:text-cyan-700">
+                  <span>Regular Overtime ({(record.overtimeHours||0).toFixed(2)} hrs)</span>
+                  <span className="font-mono font-medium">+₱{(record.regularOvertimePay||0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-cyan-400 print:text-cyan-700">
+                  <span>Night Differential ({(record.nightDifferentialHours||0).toFixed(1)} hrs)</span>
+                  <span className="font-mono font-medium">+₱{(record.nightDifferentialPay||0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-cyan-400 print:text-cyan-700">
+                  <span>Holiday Overtime</span>
+                  <span className="font-mono font-medium">+₱{(record.holidayOvertimePay||0).toLocaleString()}</span>
+                </div>
                 {record.breakdown.incentives.map((inc, i) => (
                   <div key={i} className="flex justify-between text-emerald-400 print:text-emerald-700">
                     <span>{inc.name}</span>
@@ -128,6 +138,18 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                   <div className="flex justify-between text-amber-400 print:text-amber-700">
                     <span>Late Deduction ({record.lateMinutesTotal} mins)</span>
                     <span className="font-mono">-₱{record.lateDeduction.toLocaleString()}</span>
+                  </div>
+                )}
+                {(record.overbreakMinutesTotal||0) > 0 && (
+                  <div className="flex justify-between text-amber-400 print:text-amber-700">
+                    <span>Overbreak Deduction ({record.overbreakMinutesTotal} mins)</span>
+                    <span className="font-mono">-₱{(record.overbreakDeduction||0).toLocaleString()}</span>
+                  </div>
+                )}
+                {(record.undertimeMinutesTotal||0) > 0 && (
+                  <div className="flex justify-between text-amber-400 print:text-amber-700">
+                    <span>Undertime Deduction ({record.undertimeMinutesTotal} mins)</span>
+                    <span className="font-mono">-₱{(record.undertimeDeduction||0).toLocaleString()}</span>
                   </div>
                 )}
 
@@ -160,8 +182,8 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                 Computed from actual duty attendance and approved incentives
               </p>
             </div>
-            <div className="text-2xl font-black font-mono text-emerald-400 print:text-emerald-800">
-              ₱{record.netPay.toLocaleString()}
+            <div className={`text-2xl font-black font-mono ${record.netPay < 0 ? 'text-rose-400 print:text-rose-800' : 'text-emerald-400 print:text-emerald-800'}`}>
+              {record.netPay < 0 ? '-₱' : '₱'}{Math.abs(record.netPay).toLocaleString()}
             </div>
           </div>
 

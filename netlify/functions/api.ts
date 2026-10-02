@@ -230,7 +230,7 @@ function dateOnly(v: unknown) {
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
-function dateOk(v: unknown) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')); }
+function dateOk(v: unknown) { const s=String(v || ''); if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; const [y,m,d]=s.split('-').map(Number); const dt=new Date(Date.UTC(y,m-1,d)); return dt.getUTCFullYear()===y && dt.getUTCMonth()===m-1 && dt.getUTCDate()===d; }
 function timeOk(v: unknown) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')); }
 
 async function currentUser(request: Request) {
@@ -436,7 +436,7 @@ async function handle(request: Request) {
     }
     if(path==='admin/employees'&&m==='GET'&&isAdmin(u)){
       const r=await db.sql`SELECT e.id,e.user_id AS "userId",e.employee_id AS "employeeId",e.business_id AS "businessId",e.full_name AS "fullName",e.mobile_number AS "mobileNumber",e.email,e.position,e.employment_status AS "employmentStatus",e.date_hired AS "dateHired",e.daily_rate AS "dailyRate",e.required_hours_per_day AS "requiredHoursPerDay",e.status,b.name AS "businessName" FROM employees e JOIN businesses b ON b.id=e.business_id ORDER BY e.full_name`;
-      return json(r.rows.map((x:any)=>({...x,dateHired:String(x.dateHired).slice(0,10),dailyRate:Number(x.dailyRate),requiredHoursPerDay:Number(x.requiredHoursPerDay)})));
+      return json(r.rows.map((x:any)=>({...x,dateHired:dateOnly(x.dateHired),dailyRate:Number(x.dailyRate),requiredHoursPerDay:Number(x.requiredHoursPerDay)})));
     }
     if(path==='admin/employees'&&m==='POST'&&isAdmin(u)){
       const b=await request.json(); if(!b.employeeId||!b.fullName||!b.businessId)return json({error:'Employee ID, full name, and business are required.'},400);
@@ -499,7 +499,7 @@ async function handle(request: Request) {
     }
     if(path.startsWith('admin/employees/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2]; const e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404); const b=await request.json();
-      const existingDateHired=dateOnly(e.date_hired)||''; const submittedDateHired=typeof b.dateHired==='string'?b.dateHired.trim():''; const dateHired= /^\d{4}-\d{2}-\d{2}$/.test(submittedDateHired) ? submittedDateHired : existingDateHired; if(!dateHired)return json({error:'Date hired is required.'},400); const n={fullName:b.fullName??e.full_name,mobileNumber:b.mobileNumber??e.mobile_number,email:b.email??e.email,position:b.position??e.position,employmentStatus:b.employmentStatus??e.employment_status,dateHired,businessId:b.businessId??e.business_id,dailyRate:b.dailyRate!==undefined?Number(b.dailyRate):Number(e.daily_rate),requiredHoursPerDay:b.requiredHoursPerDay!==undefined?Number(b.requiredHoursPerDay):Number(e.required_hours_per_day),status:b.status??e.status};
+      const existingDateHired=dateOnly(e.date_hired)||''; const submittedDateHired=typeof b.dateHired==='string'?b.dateHired.trim():''; const dateHired=dateOk(submittedDateHired)?submittedDateHired:existingDateHired; if(!dateHired || !dateOk(dateHired))return json({error:'A valid Date Hired is required.'},400); const n={fullName:b.fullName??e.full_name,mobileNumber:b.mobileNumber??e.mobile_number,email:b.email??e.email,position:b.position??e.position,employmentStatus:b.employmentStatus??e.employment_status,dateHired,businessId:b.businessId??e.business_id,dailyRate:b.dailyRate!==undefined?Number(b.dailyRate):Number(e.daily_rate),requiredHoursPerDay:b.requiredHoursPerDay!==undefined?Number(b.requiredHoursPerDay):Number(e.required_hours_per_day),status:b.status??e.status};
       const validBiz=(await db.sql`SELECT 1 FROM businesses WHERE id=${n.businessId} AND status='active'`).rows[0]; if(!validBiz)return json({error:'Business does not exist or is inactive.'},400);
       const mobileLogin=normMobile(n.mobileNumber)||null;
       if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} AND user_id<>${e.user_id} LIMIT 1`).rows[0])return json({error:'This mobile number is already in use by another account.'},400);

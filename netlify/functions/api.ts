@@ -262,16 +262,19 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   if(p.status==='finalized'){
     const frozen=await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
     const record=frozen.rows[0]?.payrollRecord;
-    if(record) return typeof record==='string' ? JSON.parse(record) : record;
+    if(!record) throw new Error('Finalized payroll ledger record is missing. Payroll cannot be recalculated after finalization.');
+    return typeof record==='string' ? JSON.parse(record) : record;
   }
   const sr=await db.sql`SELECT * FROM schedules WHERE employee_id=${employeeId} AND payroll_period_id=${periodId} ORDER BY date`;
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
   const ar=await db.sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY date`;
   const attendance=ar.rows;
-  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${e.business_id} OR business_id='all' ORDER BY CASE WHEN business_id=${e.business_id} THEN 0 ELSE 1 END LIMIT 1`;
+  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate", night_differential_multiplier AS "nightDifferentialMultiplier", regular_overtime_multiplier AS "regularOvertimeMultiplier" FROM payroll_settings WHERE business_id=${e.business_id} OR business_id='all' ORDER BY CASE WHEN business_id=${e.business_id} THEN 0 ELSE 1 END LIMIT 1`;
   const holidayR=await db.sql`SELECT holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE (business_id=${e.business_id} OR business_id='all') AND holiday_date BETWEEN ${p.start_date} AND ${p.end_date}`;
   const holidayMap=new Map<string, any>(holidayR.rows.map((h:any)=>[String(h.holidayDate).slice(0,10),h]));
   const ndRate=Number(hr.rows[0]?.nightDifferentialHourlyRate||0);
+  const ndMultiplier=Number(hr.rows[0]?.nightDifferentialMultiplier ?? 1);
+  const regularOtMultiplier=Number(hr.rows[0]?.regularOvertimeMultiplier ?? 1);
   const rateSnapshot=p.status==='finalized'
     ? (await db.sql`SELECT daily_rate AS "dailyRate" FROM payroll_rate_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
     : null;
@@ -286,10 +289,11 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const rawOvertimeMinutes=overtimeMinutes(a,s);
     const overtimeStatus=overtimeApprovalStatus(a,s);
     const regularOvertimeMinutes=approvedOvertimeMinutes(a,s);
-    if(present){daysWorked++; late+=metrics.lateMinutes; overtimeMinutesTotal+=regularOvertimeMinutes;}
-    const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
-    nightDiffMinutes+=nd;
+    const dateKey=dateOnly(s.date);
     const holiday=holidayMap.get(dateKey);
+    if(present){daysWorked++; late+=metrics.lateMinutes; if(!holiday) overtimeMinutesTotal+=regularOvertimeMinutes;}
+    const nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
+    nightDiffMinutes+=nd;
     if(holiday&&present&&a?.time_out){
       const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);
       if(overtimeStatus==='approved' && rawOvertimeMinutes>0){
@@ -297,12 +301,21 @@ async function calculatePayroll(employeeId:string, periodId:string) {
       }
     }
     const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
-    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus==='pending'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present&&!holiday?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus==='pending'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=payrollDailyRate/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
+  let overbreak=0, undertime=0;
+  for(const d of attendanceDays){
+    overbreak += Number(d.overbreakMinutes||0);
+    undertime += Number(d.undertimeMinutes||0);
+  }
+  const overbreakDed=Math.round(overbreak*minuteRate*100)/100;
+  const undertimeDed=Math.round(undertime*minuteRate*100)/100;
+  const hourlyRate=payrollDailyRate/Math.max(1,Number(e.required_hours_per_day||8));
+  const regularOvertimePay=Math.round((overtimeMinutesTotal/60)*hourlyRate*regularOtMultiplier*100)/100;
   const baseDutyPay=Math.round(daysWorked*payrollDailyRate*100)/100;
-  const basic=Math.max(0,Math.round((baseDutyPay-lateDed)*100)/100);
+  const basic=Math.round((baseDutyPay-lateDed-overbreakDed-undertimeDed)*100)/100;
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
   for(const i of incR.rows){
@@ -321,11 +334,17 @@ async function calculatePayroll(employeeId:string, periodId:string) {
         if(present && a?.break_out && a?.break_in && minutesBetweenTimes(a.break_out,a.break_in)>scheduleBreakMinutes(s)) q=false;
       }
     }
-    if(q) incentives.push({name:i.name,amount:Number(i.amount),type:i.incentive_type||'attendance'});
+    incentives.push({
+      name:i.name,
+      amount:q ? Number(i.amount) : 0,
+      type:i.incentive_type||'attendance',
+      qualified:q,
+      configuredAmount:Number(i.amount)
+    });
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
-  const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
-  const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
+  const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*ndMultiplier*100)/100;
+  const gross=Math.round((baseDutyPay+regularOvertimePay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
   const deductionSnapshotHeader=p.status==='finalized'
     ? (await db.sql`SELECT 1 FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
     : null;
@@ -346,13 +365,13 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
     for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
   }
-  const total=Math.round((lateDed+empD+recD)*100)/100, net=Math.max(0,Math.round((gross-total)*100)/100);
+  const total=Math.round((lateDed+overbreakDed+undertimeDed+empD+recD)*100)/100, net=Math.round((gross-total)*100)/100;
   const appr=await db.sql`SELECT approved_at FROM payroll_approvals WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
     employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:payrollDailyRate,
-    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
+    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overbreakMinutesTotal:overbreak,undertimeMinutesTotal:undertime,lateDeduction:lateDed,overbreakDeduction:overbreakDed,undertimeDeduction:undertimeDed,regularOvertimePay,regularOvertimeMultiplier:regularOtMultiplier,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialMultiplier:ndMultiplier,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
     finalizedAt:p.status==='finalized'?dateOnly(p.payout_date):undefined,
@@ -687,18 +706,18 @@ async function handle(request: Request) {
     }
     if(path==='admin/settings'&&m==='GET'&&isAdmin(u)){
       const biz=new URL(request.url).searchParams.get('businessId')||'all';
-      const s=(await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${biz} OR business_id='all' ORDER BY CASE WHEN business_id=${biz} THEN 0 ELSE 1 END LIMIT 1`).rows[0];
+      const s=(await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate",night_differential_multiplier AS "nightDifferentialMultiplier",regular_overtime_multiplier AS "regularOvertimeMultiplier" FROM payroll_settings WHERE business_id=${biz} OR business_id='all' ORDER BY CASE WHEN business_id=${biz} THEN 0 ELSE 1 END LIMIT 1`).rows[0];
       const h=(await db.sql`SELECT id,business_id AS "businessId",holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE business_id=${biz} OR business_id='all' ORDER BY holiday_date`).rows;
-      return json({businessId:biz,nightDifferentialHourlyRate:Number(s?.nightDifferentialHourlyRate||0),holidays:h.map((x:any)=>({...x,holidayDate:String(x.holidayDate).slice(0,10),overtimeRate:Number(x.overtimeRate)}))});
+      return json({businessId:biz,nightDifferentialHourlyRate:Number(s?.nightDifferentialHourlyRate||0),nightDifferentialMultiplier:Number(s?.nightDifferentialMultiplier??1),regularOvertimeMultiplier:Number(s?.regularOvertimeMultiplier??1),holidays:h.map((x:any)=>({...x,holidayDate:String(x.holidayDate).slice(0,10),overtimeRate:Number(x.overtimeRate)}))});
     }
     if(path==='admin/settings'&&m==='PUT'&&isAdmin(u)){
-      const b=await request.json(), biz=String(b.businessId||'all'), rate=Number(b.nightDifferentialHourlyRate||0);
-      if(rate<0)return json({error:'Night differential hourly rate cannot be negative.'},400);
-      if(biz!=='all' && !(await db.sql`SELECT 1 FROM businesses WHERE id=${biz}`).rows[0])return json({error:'Business not found.'},404);
-      await db.sql`INSERT INTO payroll_settings(business_id,night_differential_hourly_rate) VALUES(${biz},${rate}) ON CONFLICT(business_id) DO UPDATE SET night_differential_hourly_rate=EXCLUDED.night_differential_hourly_rate,updated_at=NOW()`;
-      return json({success:true,businessId:biz,nightDifferentialHourlyRate:rate});
-    }
-    if(path==='admin/holidays'&&m==='POST'&&isAdmin(u)){
+       const b=await request.json(), biz=String(b.businessId||'all'), rate=Number(b.nightDifferentialHourlyRate), ndMultiplier=Number(b.nightDifferentialMultiplier), regularOtMultiplier=Number(b.regularOvertimeMultiplier);
+       if(!Number.isFinite(rate)||rate<0||!Number.isFinite(ndMultiplier)||ndMultiplier<0||!Number.isFinite(regularOtMultiplier)||regularOtMultiplier<0)return json({error:'Payroll rates and multipliers must be valid non-negative numbers.'},400);
+       if(biz!=='all' && !(await db.sql`SELECT 1 FROM businesses WHERE id=${biz}`).rows[0])return json({error:'Business not found.'},404);
+       await db.sql`INSERT INTO payroll_settings(business_id,night_differential_hourly_rate,night_differential_multiplier,regular_overtime_multiplier) VALUES(${biz},${rate},${ndMultiplier},${regularOtMultiplier}) ON CONFLICT(business_id) DO UPDATE SET night_differential_hourly_rate=EXCLUDED.night_differential_hourly_rate,night_differential_multiplier=EXCLUDED.night_differential_multiplier,regular_overtime_multiplier=EXCLUDED.regular_overtime_multiplier,updated_at=NOW()`;
+       return json({success:true,businessId:biz,nightDifferentialHourlyRate:rate,nightDifferentialMultiplier:ndMultiplier,regularOvertimeMultiplier:regularOtMultiplier});
+     }
+     if(path==='admin/holidays'&&m==='POST'&&isAdmin(u)){
       const b=await request.json();
       if(!dateOk(b.holidayDate)||!b.name||!holidayTypeOk(b.holidayType)||Number(b.overtimeRate)<0)return json({error:'Holiday date, name, type, and a valid overtime rate are required.'},400);
       const id=`hol_${randomBytes(8).toString('hex')}`;
@@ -801,10 +820,15 @@ async function handle(request: Request) {
       if(!p)return json({error:'Payroll period not found.'},404);
       let records:any[]=[];
       if(p.status==='finalized'){
-        const frozen=(await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
-        if(frozen.length)records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
-      }
-      if(!records.length){
+        const frozen=(await db.sql`SELECT employee_id AS "employeeId", payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
+        const rateSnapshots=(await db.sql`SELECT COUNT(*)::int AS count FROM payroll_rate_snapshots WHERE payroll_period_id=${id}`).rows[0]?.count ?? 0;
+        const deductionHeaders=(await db.sql`SELECT COUNT(*)::int AS count FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${id}`).rows[0]?.count ?? 0;
+        const malformed=frozen.some((row:any)=>!row.employeeId||!row.payrollRecord);
+        if(!frozen.length || malformed || Number(rateSnapshots)!==Number(frozen.length) || Number(deductionHeaders)!==Number(frozen.length)){
+          return json({error:'Finalized payroll integrity error: frozen payroll ledger or snapshots are incomplete. No live recalculation was performed.'},409);
+        }
+        records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
+      } else {
         const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;
         for(const e of es)records.push(await calculatePayroll(e.id,id));
       }

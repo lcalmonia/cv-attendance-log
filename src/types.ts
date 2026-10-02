@@ -140,7 +140,11 @@ export interface PayrollRecord {
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;
+  overbreakMinutesTotal?: number;
+  undertimeMinutesTotal?: number;
   lateDeduction: number;
+  overbreakDeduction?: number;
+  undertimeDeduction?: number;
   baseDutyPay: number;
   basicPay: number;
   incentivePay: number;
@@ -154,13 +158,16 @@ export interface PayrollRecord {
   finalizedAt?: string;
   nightDifferentialHours?: number;
   nightDifferentialHourlyRate?: number;
+  nightDifferentialMultiplier?: number;
   nightDifferentialPay?: number;
+  regularOvertimeMultiplier?: number;
   holidayOvertimePay?: number;
+  regularOvertimePay?: number;
   overtimeMinutesTotal?: number;
   overtimeHours?: number;
   pendingOvertimeMinutesTotal?: number;
   breakdown: {
-    incentives: Array<{ name: string; amount: number }>;
+    incentives: Array<{ name: string; amount: number; qualified?: boolean; configuredAmount?: number }>;
     deductions: Array<{ name: string; amount: number; type: 'employee' | 'recurring' }>;
     attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; undertimeMinutes?: number; overbreakMinutes?: number; varianceMinutes?: number; overtimeMinutes?: number; overtimeApprovalStatus?: OvertimeApprovalStatus; pendingOvertimeMinutes?: number; hours: number }>;
   };
@@ -168,4 +175,4 @@ export interface PayrollRecord {
 
 
 export interface Holiday { id:string; businessId:string; holidayDate:string; name:string; holidayType:'regular'|'special_non_working'|'special_working'; overtimeRate:number; }
-export interface PayrollSettings { businessId:string; nightDifferentialHourlyRate:number; holidays:Holiday[]; }
+export interface PayrollSettings { businessId:string; nightDifferentialHourlyRate:number; nightDifferentialMultiplier:number; regularOvertimeMultiplier:number; holidays:Holiday[]; }

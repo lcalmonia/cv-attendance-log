@@ -230,7 +230,7 @@ function dateOnly(v: unknown) {
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
-function dateOk(v: unknown) { return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')); }
+function dateOk(v: unknown) { const s=String(v || ''); if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; const [y,m,d]=s.split('-').map(Number); const dt=new Date(Date.UTC(y,m-1,d)); return dt.getUTCFullYear()===y && dt.getUTCMonth()===m-1 && dt.getUTCDate()===d; }
 function timeOk(v: unknown) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')); }
 
 async function currentUser(request: Request) {
@@ -259,6 +259,11 @@ async function employeePayrollPeriods() {
 async function calculatePayroll(employeeId:string, periodId:string) {
   const e=await employeeById(employeeId), p=await periodById(periodId);
   if(!e||!p) throw new Error('Employee or payroll period not found.');
+  if(p.status==='finalized'){
+    const frozen=await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
+    const record=frozen.rows[0]?.payrollRecord;
+    if(record) return typeof record==='string' ? JSON.parse(record) : record;
+  }
   const sr=await db.sql`SELECT * FROM schedules WHERE employee_id=${employeeId} AND payroll_period_id=${periodId} ORDER BY date`;
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
   const ar=await db.sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY date`;
@@ -267,6 +272,10 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const holidayR=await db.sql`SELECT holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE (business_id=${e.business_id} OR business_id='all') AND holiday_date BETWEEN ${p.start_date} AND ${p.end_date}`;
   const holidayMap=new Map<string, any>(holidayR.rows.map((h:any)=>[String(h.holidayDate).slice(0,10),h]));
   const ndRate=Number(hr.rows[0]?.nightDifferentialHourlyRate||0);
+  const rateSnapshot=p.status==='finalized'
+    ? (await db.sql`SELECT daily_rate AS "dailyRate" FROM payroll_rate_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
+    : null;
+  const payrollDailyRate=Number(rateSnapshot?.dailyRate ?? e.daily_rate);
   let daysWorked=0, late=0, nightDiffMinutes=0, overtimeMinutesTotal=0, holidayOvertimePay=0;
   const attendanceDays:any[]=[];
   for(const s of duty){
@@ -284,15 +293,15 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     if(holiday&&present&&a?.time_out){
       const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);
       if(overtimeStatus==='approved' && rawOvertimeMinutes>0){
-        holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
+        holidayOvertimePay+=Math.round((ot/60)*payrollDailyRate/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
       }
     }
     const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
     attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus==='pending'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
-  const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
+  const minuteRate=payrollDailyRate/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
-  const baseDutyPay=Math.round(daysWorked*Number(e.daily_rate)*100)/100;
+  const baseDutyPay=Math.round(daysWorked*payrollDailyRate*100)/100;
   const basic=Math.max(0,Math.round((baseDutyPay-lateDed)*100)/100);
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
@@ -317,17 +326,32 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
   const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
-  const ed=await db.sql`SELECT * FROM employee_deductions WHERE employee_id=${employeeId} AND status='active' AND (recurring=true OR payroll_period_id=${periodId}) ORDER BY deduction_name`;
-  const cd=await db.sql`SELECT * FROM deduction_types WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') ORDER BY name`;
+  const deductionSnapshotHeader=p.status==='finalized'
+    ? (await db.sql`SELECT 1 FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
+    : null;
+  const deductionSnapshot=deductionSnapshotHeader
+    ? (await db.sql`SELECT deduction_name AS "deductionName",amount,deduction_type AS "deductionType" FROM payroll_deduction_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId} ORDER BY line_no`).rows
+    : [];
   const deductions:any[]=[]; let empD=0, recD=0;
-  for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
-  for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
+  if(deductionSnapshot.length){
+    for(const d of deductionSnapshot){
+      const a=Number(d.amount);
+      if(d.deductionType==='employee') empD+=a;
+      else if(d.deductionType==='recurring') recD+=a;
+      deductions.push({name:d.deductionName,amount:a,type:d.deductionType});
+    }
+  } else {
+    const ed=await db.sql`SELECT * FROM employee_deductions WHERE employee_id=${employeeId} AND status='active' AND (recurring=true OR payroll_period_id=${periodId}) ORDER BY deduction_name`;
+    const cd=await db.sql`SELECT * FROM deduction_types WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') ORDER BY name`;
+    for(const d of ed.rows){const a=Number(d.amount); empD+=a; deductions.push({name:d.deduction_name,amount:a,type:'employee'});}
+    for(const d of cd.rows){const a=d.calculation_type==='percentage'?Math.round(gross*Number(d.value)/100*100)/100:Number(d.value);recD+=a;deductions.push({name:d.name,amount:a,type:'recurring'});}
+  }
   const total=Math.round((lateDed+empD+recD)*100)/100, net=Math.max(0,Math.round((gross-total)*100)/100);
   const appr=await db.sql`SELECT approved_at FROM payroll_approvals WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
-    employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:Number(e.daily_rate),
+    employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:payrollDailyRate,
     scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
@@ -436,7 +460,7 @@ async function handle(request: Request) {
     }
     if(path==='admin/employees'&&m==='GET'&&isAdmin(u)){
       const r=await db.sql`SELECT e.id,e.user_id AS "userId",e.employee_id AS "employeeId",e.business_id AS "businessId",e.full_name AS "fullName",e.mobile_number AS "mobileNumber",e.email,e.position,e.employment_status AS "employmentStatus",e.date_hired AS "dateHired",e.daily_rate AS "dailyRate",e.required_hours_per_day AS "requiredHoursPerDay",e.status,b.name AS "businessName" FROM employees e JOIN businesses b ON b.id=e.business_id ORDER BY e.full_name`;
-      return json(r.rows.map((x:any)=>({...x,dateHired:String(x.dateHired).slice(0,10),dailyRate:Number(x.dailyRate),requiredHoursPerDay:Number(x.requiredHoursPerDay)})));
+      return json(r.rows.map((x:any)=>({...x,dateHired:dateOnly(x.dateHired),dailyRate:Number(x.dailyRate),requiredHoursPerDay:Number(x.requiredHoursPerDay)})));
     }
     if(path==='admin/employees'&&m==='POST'&&isAdmin(u)){
       const b=await request.json(); if(!b.employeeId||!b.fullName||!b.businessId)return json({error:'Employee ID, full name, and business are required.'},400);
@@ -499,7 +523,7 @@ async function handle(request: Request) {
     }
     if(path.startsWith('admin/employees/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2]; const e=await employeeById(id); if(!e)return json({error:'Employee not found.'},404); const b=await request.json();
-      const n={fullName:b.fullName??e.full_name,mobileNumber:b.mobileNumber??e.mobile_number,email:b.email??e.email,position:b.position??e.position,employmentStatus:b.employmentStatus??e.employment_status,dateHired:b.dateHired??String(e.date_hired).slice(0,10),businessId:b.businessId??e.business_id,dailyRate:b.dailyRate!==undefined?Number(b.dailyRate):Number(e.daily_rate),requiredHoursPerDay:b.requiredHoursPerDay!==undefined?Number(b.requiredHoursPerDay):Number(e.required_hours_per_day),status:b.status??e.status};
+      const existingDateHired=dateOnly(e.date_hired)||''; const submittedDateHired=typeof b.dateHired==='string'?b.dateHired.trim():''; const dateHired=dateOk(submittedDateHired)?submittedDateHired:existingDateHired; if(!dateHired || !dateOk(dateHired))return json({error:'A valid Date Hired is required.'},400); const n={fullName:b.fullName??e.full_name,mobileNumber:b.mobileNumber??e.mobile_number,email:b.email??e.email,position:b.position??e.position,employmentStatus:b.employmentStatus??e.employment_status,dateHired,businessId:b.businessId??e.business_id,dailyRate:b.dailyRate!==undefined?Number(b.dailyRate):Number(e.daily_rate),requiredHoursPerDay:b.requiredHoursPerDay!==undefined?Number(b.requiredHoursPerDay):Number(e.required_hours_per_day),status:b.status??e.status};
       const validBiz=(await db.sql`SELECT 1 FROM businesses WHERE id=${n.businessId} AND status='active'`).rows[0]; if(!validBiz)return json({error:'Business does not exist or is inactive.'},400);
       const mobileLogin=normMobile(n.mobileNumber)||null;
       if(mobileLogin && (await db.sql`SELECT 1 FROM auth_accounts WHERE mobile_login=${mobileLogin} AND user_id<>${e.user_id} LIMIT 1`).rows[0])return json({error:'This mobile number is already in use by another account.'},400);
@@ -516,12 +540,16 @@ async function handle(request: Request) {
     }
     if(path==='admin/periods'&&m==='POST'&&isAdmin(u)){
       const b=await request.json(); if(!dateOk(b.startDate)||!dateOk(b.endDate)||!dateOk(b.payoutDate)||b.endDate<b.startDate)return json({error:'Valid start date, end date, and payout date are required.'},400);
-      const id=`period_${randomBytes(8).toString('hex')}`; await db.sql`INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES(${id},${b.name||`${b.startDate} to ${b.endDate}`},${b.startDate},${b.endDate},${b.payoutDate},${b.status||'open'})`;
+      const status=b.status||'open';
+      if(status==='finalized')return json({error:'A payroll period must be finalized through the payroll finalization process.'},400);
+      const id=`period_${randomBytes(8).toString('hex')}`; await db.sql`INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES(${id},${b.name||`${b.startDate} to ${b.endDate}`},${b.startDate},${b.endDate},${b.payoutDate},${status})`;
       return json({id,name:b.name||`${b.startDate} to ${b.endDate}`,startDate:b.startDate,endDate:b.endDate,payoutDate:b.payoutDate,status:b.status||'open'});
     }
     if(path.startsWith('admin/periods/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2], p=await periodById(id); if(!p)return json({error:'Payroll period not found.'},404); const b=await request.json();
       const n={name:b.name??p.name,startDate:b.startDate??dateOnly(p.start_date),endDate:b.endDate??dateOnly(p.end_date),payoutDate:b.payoutDate??dateOnly(p.payout_date),status:b.status??p.status};
+      if(p.status==='finalized')return json({error:'Finalized payroll periods cannot be edited.'},400);
+      if(n.status==='finalized')return json({error:'A payroll period must be finalized through the payroll finalization process.'},400);
       if(!dateOk(n.startDate)||!dateOk(n.endDate)||n.endDate<n.startDate)return json({error:'Invalid period dates.'},400);
       await db.sql`UPDATE payroll_periods SET name=${n.name},start_date=${n.startDate},end_date=${n.endDate},payout_date=${n.payoutDate},status=${n.status} WHERE id=${id}`;
       return json({id,...n});
@@ -692,6 +720,11 @@ async function handle(request: Request) {
       const ti=iso(b.timeIn), bo=iso(b.breakOut), bi=iso(b.breakIn), to=iso(b.timeOut);
       if([b.timeIn,b.breakOut,b.breakIn,b.timeOut].some((v:any)=>v && Number.isNaN(new Date(v).getTime())))return json({error:'One or more attendance times are invalid.'},400);
       const schedule=await resolveScheduleForAttendance(e.id,b.date,b.payrollPeriodId||null);
+      const attendancePeriodId=schedule?.payroll_period_id||b.payrollPeriodId||null;
+      if(attendancePeriodId){
+        const p=await periodById(attendancePeriodId);
+        if(p?.status==='finalized')return json({error:'Attendance cannot be changed after the payroll period is finalized.'},400);
+      }
       const draft={time_in:ti,break_out:bo,break_in:bi,time_out:to};
       const metrics=attendanceVariance(draft,schedule);
       const late=metrics.lateMinutes;
@@ -722,13 +755,21 @@ async function handle(request: Request) {
     }
     if(path.startsWith('admin/attendance/')&&m==='DELETE'&&isAdmin(u)){
       const id=path.split('/')[2];
-      const a=(await db.sql`SELECT id FROM attendance WHERE id=${id}`).rows[0];
+      const a=(await db.sql`SELECT id,payroll_period_id FROM attendance WHERE id=${id}`).rows[0];
       if(!a)return json({error:'Attendance record not found.'},404);
+      if(a.payroll_period_id){
+        const p=await periodById(a.payroll_period_id);
+        if(p?.status==='finalized')return json({error:'Attendance cannot be changed after the payroll period is finalized.'},400);
+      }
       await db.sql`DELETE FROM attendance WHERE id=${id}`;
       return json({success:true});
     }
     if(path.startsWith('admin/attendance/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2], a=(await db.sql`SELECT * FROM attendance WHERE id=${id}`).rows[0]; if(!a)return json({error:'Attendance record not found.'},404);
+      if(a.payroll_period_id){
+        const p=await periodById(a.payroll_period_id);
+        if(p?.status==='finalized')return json({error:'Attendance cannot be changed after the payroll period is finalized.'},400);
+      }
       const b=await request.json(), iso=(v:any)=>v?new Date(v).toISOString():null;
       const n={timeIn:b.timeIn!==undefined?iso(b.timeIn):a.time_in,breakOut:b.breakOut!==undefined?iso(b.breakOut):a.break_out,breakIn:b.breakIn!==undefined?iso(b.breakIn):a.break_in,timeOut:b.timeOut!==undefined?iso(b.timeOut):a.time_out};
       const schedule=await resolveScheduleForAttendance(a.employee_id,a.date,a.payroll_period_id||b.payrollPeriodId||null);
@@ -745,17 +786,60 @@ async function handle(request: Request) {
     }
     if(path==='admin/deductions/types'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT id,business_id AS "businessId",name,calculation_type AS "calculationType",value,recurring,status FROM deduction_types ORDER BY name`;return json(r.rows.map((x:any)=>({...x,value:Number(x.value)})));}
     if(path==='admin/deductions/types'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.name||b.value===undefined)return json({error:'Name and value are required.'},400);const id=`ded_${randomBytes(8).toString('hex')}`;await db.sql`INSERT INTO deduction_types(id,business_id,name,calculation_type,value,recurring,status) VALUES(${id},${b.businessId||'all'},${b.name},${b.calculationType||'fixed'},${Number(b.value)},${b.recurring!==false},${b.status||'active'})`;return json({id,businessId:b.businessId||'all',name:b.name,calculationType:b.calculationType||'fixed',value:Number(b.value),recurring:b.recurring!==false,status:b.status||'active'});}
-    if(path.startsWith('admin/deductions/types/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[3],d=(await db.sql`SELECT * FROM deduction_types WHERE id=${id}`).rows[0];if(!d)return json({error:'Deduction type not found.'},404);const b=await request.json(),n={name:b.name??d.name,calculationType:b.calculationType??d.calculation_type,value:b.value!==undefined?Number(b.value):Number(d.value),recurring:b.recurring!==undefined?Boolean(b.recurring):d.recurring,status:b.status??d.status};await db.sql`UPDATE deduction_types SET name=${n.name},calculation_type=${n.calculationType},value=${n.value},recurring=${n.recurring},status=${n.status} WHERE id=${id}`;return json({id,businessId:d.business_id,...n});}
+    if(path.startsWith('admin/deductions/types/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[3],d=(await db.sql`SELECT * FROM deduction_types WHERE id=${id}`).rows[0];if(!d)return json({error:'Deduction type not found.'},404);const b=await request.json(),n={businessId:b.businessId??d.business_id,name:b.name??d.name,calculationType:b.calculationType??d.calculation_type,value:b.value!==undefined?Number(b.value):Number(d.value),recurring:b.recurring!==undefined?Boolean(b.recurring):Boolean(d.recurring),status:b.status??d.status};if(!n.name||!['fixed','percentage'].includes(n.calculationType)||!Number.isFinite(n.value)||n.value<0)return json({error:'Invalid deduction data.'},400);if(n.businessId!=='all'&&!(await db.sql`SELECT 1 FROM businesses WHERE id=${n.businessId}`).rows[0])return json({error:'Business not found.'},404);await db.sql`UPDATE deduction_types SET business_id=${n.businessId},name=${n.name},calculation_type=${n.calculationType},value=${n.value},recurring=${n.recurring},status=${n.status} WHERE id=${id}`;return json({id,businessId:n.businessId,...n});}
     if(path.startsWith('admin/deductions/types/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM deduction_types WHERE id=${path.split('/')[3]}`;return json({success:true});}
     if(path==='admin/deductions/employee'&&m==='GET'&&isAdmin(u)){const id=new URL(request.url).searchParams.get('employeeId');const r=id?await db.sql`SELECT d.*,e.full_name AS "employeeName" FROM employee_deductions d JOIN employees e ON e.id=d.employee_id WHERE d.employee_id=${id} ORDER BY d.id DESC`:await db.sql`SELECT d.*,e.full_name AS "employeeName" FROM employee_deductions d JOIN employees e ON e.id=d.employee_id ORDER BY d.id DESC`;return json(r.rows.map((x:any)=>({id:x.id,employeeId:x.employee_id,deductionTypeId:x.deduction_type_id||undefined,deductionName:x.deduction_name,amount:Number(x.amount),payrollPeriodId:x.payroll_period_id||undefined,recurring:Boolean(x.recurring),status:x.status,employeeName:x.employeeName})));}
     if(path==='admin/deductions/employee'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.employeeId||!b.deductionName||b.amount===undefined)return json({error:'Employee, deduction name, and amount are required.'},400);if(b.recurring===false&&!b.payrollPeriodId)return json({error:'Payroll period is required for one-time deductions.'},400);const id=`empded_${randomBytes(8).toString('hex')}`;await db.sql`INSERT INTO employee_deductions(id,employee_id,deduction_type_id,deduction_name,amount,payroll_period_id,recurring,status) VALUES(${id},${b.employeeId},${b.deductionTypeId||null},${b.deductionName},${Number(b.amount)},${b.recurring?null:b.payrollPeriodId},${Boolean(b.recurring)},${b.status||'active'})`;return json({id,employeeId:b.employeeId,deductionTypeId:b.deductionTypeId,deductionName:b.deductionName,amount:Number(b.amount),payrollPeriodId:b.recurring?undefined:b.payrollPeriodId,recurring:Boolean(b.recurring),status:b.status||'active'});}
+    if(path.startsWith('admin/deductions/employee/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[3],d=(await db.sql`SELECT * FROM employee_deductions WHERE id=${id}`).rows[0];if(!d)return json({error:'Employee deduction not found.'},404);const b=await request.json(),n={employeeId:b.employeeId??d.employee_id,deductionTypeId:b.deductionTypeId!==undefined?(b.deductionTypeId||null):(d.deduction_type_id||null),deductionName:b.deductionName??d.deduction_name,amount:b.amount!==undefined?Number(b.amount):Number(d.amount),payrollPeriodId:b.recurring===true?null:(b.payrollPeriodId ?? d.payroll_period_id ?? null),recurring:b.recurring!==undefined?Boolean(b.recurring):Boolean(d.recurring),status:b.status??d.status};if(!n.employeeId||!n.deductionName||!Number.isFinite(n.amount)||n.amount<0)return json({error:'Invalid employee deduction data.'},400);if(n.recurring===false&&!n.payrollPeriodId)return json({error:'Payroll period is required for one-time deductions.'},400);if(!(await employeeById(n.employeeId)))return json({error:'Employee not found.'},404);await db.sql`UPDATE employee_deductions SET employee_id=${n.employeeId},deduction_type_id=${n.deductionTypeId},deduction_name=${n.deductionName},amount=${n.amount},payroll_period_id=${n.payrollPeriodId},recurring=${n.recurring},status=${n.status} WHERE id=${id}`;return json({id,employeeId:n.employeeId,deductionTypeId:n.deductionTypeId||undefined,deductionName:n.deductionName,amount:n.amount,payrollPeriodId:n.payrollPeriodId||undefined,recurring:n.recurring,status:n.status});}
     if(path.startsWith('admin/deductions/employee/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM employee_deductions WHERE id=${path.split('/')[3]}`;return json({success:true});}
     if(path==='admin/incentives'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT i.id,i.business_id AS "businessId",i.name,i.description,i.amount,i.incentive_type AS "incentiveType",i.require_no_late AS "requireNoLate",i.require_no_absence AS "requireNoAbsence",i.require_no_undertime AS "requireNoUndertime",i.status,i.effective_date AS "effectiveDate",CASE WHEN i.business_id='all' THEN 'All Businesses' ELSE COALESCE(b.name,'') END AS "businessName" FROM incentive_programs i LEFT JOIN businesses b ON b.id=i.business_id ORDER BY i.name`;return json(r.rows.map((x:any)=>({...x,amount:Number(x.amount)}))); }
     if(path==='admin/incentives'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.businessId||!b.name||b.amount===undefined)return json({error:'Business, name, and amount are required.'},400);const id=`inc_${randomBytes(8).toString('hex')}`,type=b.incentiveType||'attendance';if(!['attendance','other'].includes(type))return json({error:'Invalid incentive type.'},400);await db.sql`INSERT INTO incentive_programs(id,business_id,name,description,amount,incentive_type,require_no_late,require_no_absence,require_no_undertime,status,effective_date) VALUES(${id},${b.businessId},${b.name},${b.description||''},${Number(b.amount)},${type},${b.requireNoLate!==false},${b.requireNoAbsence!==false},${b.requireNoUndertime===true},${b.status||'active'},${b.effectiveDate||phNow().date})`;return json({id,businessId:b.businessId,name:b.name,description:b.description||'',amount:Number(b.amount),incentiveType:type,requireNoLate:b.requireNoLate!==false,requireNoAbsence:b.requireNoAbsence!==false,requireNoUndertime:b.requireNoUndertime===true,status:b.status||'active',effectiveDate:b.effectiveDate||phNow().date});}
     if(path.startsWith('admin/incentives/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[2],i=(await db.sql`SELECT * FROM incentive_programs WHERE id=${id}`).rows[0];if(!i)return json({error:'Incentive not found.'},404);const b=await request.json(),n={name:b.name??i.name,description:b.description??i.description,amount:b.amount!==undefined?Number(b.amount):Number(i.amount),incentiveType:b.incentiveType??i.incentive_type,requireNoLate:b.requireNoLate!==undefined?Boolean(b.requireNoLate):i.require_no_late,requireNoAbsence:b.requireNoAbsence!==undefined?Boolean(b.requireNoAbsence):i.require_no_absence,requireNoUndertime:b.requireNoUndertime!==undefined?Boolean(b.requireNoUndertime):Boolean(i.require_no_undertime),status:b.status??i.status,effectiveDate:b.effectiveDate??String(i.effective_date).slice(0,10)};if(!['attendance','other'].includes(n.incentiveType))return json({error:'Invalid incentive type.'},400);await db.sql`UPDATE incentive_programs SET name=${n.name},description=${n.description},amount=${n.amount},incentive_type=${n.incentiveType},require_no_late=${n.requireNoLate},require_no_absence=${n.requireNoAbsence},require_no_undertime=${n.requireNoUndertime},status=${n.status},effective_date=${n.effectiveDate} WHERE id=${id}`;return json({id,businessId:i.business_id,...n});}
     if(path.startsWith('admin/incentives/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM incentive_programs WHERE id=${path.split('/')[2]}`;return json({success:true});}
-    if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){const id=path.split('/')[2],p=await periodById(id);if(!p)return json({error:'Payroll period not found.'},404);const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;const records=[];for(const e of es)records.push(await calculatePayroll(e.id,id));return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},records});}
-    if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);if(!(await periodById(b.periodId)))return json({error:'Payroll period not found.'},404);await db.sql`UPDATE payroll_periods SET status=${b.status} WHERE id=${b.periodId}`;return json({success:true,status:b.status});}
+    if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){
+      const id=path.split('/')[2],p=await periodById(id);
+      if(!p)return json({error:'Payroll period not found.'},404);
+      let records:any[]=[];
+      if(p.status==='finalized'){
+        const frozen=(await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
+        if(frozen.length)records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
+      }
+      if(!records.length){
+        const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;
+        for(const e of es)records.push(await calculatePayroll(e.id,id));
+      }
+      return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},records});
+    }
+    if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){
+      const b=await request.json();
+      if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);
+      const p=await periodById(b.periodId);
+      if(!p)return json({error:'Payroll period not found.'},404);
+      if(p.status==='finalized'&&b.status!=='finalized')return json({error:'Finalized payroll cannot be reopened.'},400);
+      if(b.status==='finalized'&&p.status!=='finalized'){
+        const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;
+        const payrollRecords=await Promise.all(es.map((e:any)=>calculatePayroll(e.id,p.id)));
+        await withTransaction(async(client:any)=>{
+          const locked=(await client.query('SELECT status FROM payroll_periods WHERE id=$1 FOR UPDATE',[p.id])).rows[0];
+          if(!locked)throw new Error('Payroll period not found.');
+          if(locked.status==='finalized')throw new Error('Payroll period is already finalized.');
+          for(const r of payrollRecords){
+            await client.query('INSERT INTO finalized_payroll_ledger(payroll_period_id,employee_id,payroll_record) VALUES($1,$2,$3::jsonb) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',[p.id,r.employeeId,JSON.stringify(r)]);
+            await client.query('INSERT INTO payroll_rate_snapshots(id,payroll_period_id,employee_id,daily_rate) VALUES($1,$2,$3,$4) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',['rate_'+p.id+'_'+r.employeeId,p.id,r.employeeId,r.dailyRate]);
+            await client.query('DELETE FROM payroll_deduction_snapshots WHERE payroll_period_id=$1 AND employee_id=$2',[p.id,r.employeeId]);
+            await client.query('INSERT INTO payroll_deduction_snapshot_headers(payroll_period_id,employee_id) VALUES($1,$2) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',[p.id,r.employeeId]);
+            for(let i=0;i<r.breakdown.deductions.length;i++){
+              const d=r.breakdown.deductions[i];
+              await client.query('INSERT INTO payroll_deduction_snapshots(id,payroll_period_id,employee_id,line_no,deduction_name,deduction_type,amount) VALUES($1,$2,$3,$4,$5,$6,$7)',['pds_'+p.id+'_'+r.employeeId+'_'+i,p.id,r.employeeId,i,d.name,d.type,Number(d.amount)]);
+            }
+          }
+          await client.query('UPDATE payroll_periods SET status=$1 WHERE id=$2',['finalized',p.id]);
+        });
+      } else {
+        await db.sql`UPDATE payroll_periods SET status=${b.status} WHERE id=${b.periodId}`;
+      }
+      return json({success:true,status:b.status});
+    }
     if(path==='employee/dashboard'&&m==='GET'&&isEmployee(u)){const e=await employeeById(u.employeeDbId),biz=e?(await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`).rows[0]:null;if(!e)return json({error:'Employee record not found.'},404);const today=phNow().date;
       let a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
       let s=await resolveScheduleForAttendance(e.id,today,a?.payroll_period_id||null);

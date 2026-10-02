@@ -171,6 +171,8 @@ export const api = {
     },
     createEmployeeDeduction: (data: Partial<EmployeeDeduction>) =>
       request<EmployeeDeduction>('/api/admin/deductions/employee', { method: 'POST', body: JSON.stringify(data) }),
+    updateEmployeeDeduction: (id: string, data: Partial<EmployeeDeduction>) =>
+      request<EmployeeDeduction>(`/api/admin/deductions/employee/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteEmployeeDeduction: (id: string) =>
       request<{ success: boolean }>(`/api/admin/deductions/employee/${id}`, { method: 'DELETE' }),
 

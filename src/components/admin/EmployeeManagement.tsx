@@ -82,7 +82,7 @@ export const EmployeeManagement: React.FC = () => {
       email: emp.email || '',
       position: emp.position || '',
       employmentStatus: emp.employmentStatus,
-      dateHired: emp.dateHired || new Date().toISOString().slice(0, 10),
+      dateHired: emp.dateHired ? String(emp.dateHired).slice(0, 10) : new Date().toISOString().slice(0, 10),
       businessId: emp.businessId,
       dailyRate: emp.dailyRate,
       requiredHoursPerDay: emp.requiredHoursPerDay,

@@ -140,7 +140,11 @@ export interface PayrollRecord {
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;
+  overbreakMinutesTotal?: number;
+  undertimeMinutesTotal?: number;
   lateDeduction: number;
+  overbreakDeduction?: number;
+  undertimeDeduction?: number;
   baseDutyPay: number;
   basicPay: number;
   incentivePay: number;
@@ -156,6 +160,7 @@ export interface PayrollRecord {
   nightDifferentialHourlyRate?: number;
   nightDifferentialPay?: number;
   holidayOvertimePay?: number;
+  regularOvertimePay?: number;
   overtimeMinutesTotal?: number;
   overtimeHours?: number;
   pendingOvertimeMinutesTotal?: number;

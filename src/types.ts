@@ -162,7 +162,7 @@ export interface PayrollRecord {
   breakdown: {
     incentives: Array<{ name: string; amount: number }>;
     deductions: Array<{ name: string; amount: number; type: 'employee' | 'recurring' }>;
-    attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; overtimeMinutes?: number; overtimeApprovalStatus?: OvertimeApprovalStatus; pendingOvertimeMinutes?: number; hours: number }>;
+    attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; undertimeMinutes?: number; overbreakMinutes?: number; varianceMinutes?: number; overtimeMinutes?: number; overtimeApprovalStatus?: OvertimeApprovalStatus; pendingOvertimeMinutes?: number; hours: number }>;
   };
 }
 

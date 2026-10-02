@@ -30,8 +30,8 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition shadow-md shadow-blue-600/25"
             >
               <Printer className="w-4 h-4" />
-              <span className="hidden xs:inline">Print / Save PDF</span>
-              <span className="xs:hidden">Print</span>
+              <span className="hidden sm:inline">Print / Save PDF</span>
+              <span className="sm:hidden">Print</span>
             </button>
             <button
               onClick={onClose}

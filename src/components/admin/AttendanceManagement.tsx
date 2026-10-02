@@ -107,6 +107,19 @@ export const AttendanceManagement: React.FC = () => {
           ? <>Scheduled duty: <span className="font-semibold text-slate-200">{schedule.requiredTimeIn} – {schedule.requiredTimeOut}</span>{schedule.breakOut&&schedule.breakIn?<><span className="mx-2 text-slate-600">•</span>Required break: <span className="font-semibold text-slate-200">{schedule.breakOut} – {schedule.breakIn} ({minutesBetween(schedule.breakOut,schedule.breakIn)} min)</span></>:<span className="ml-2 text-amber-400">• No required break is configured for this schedule</span>}</>
           : 'No working schedule found for this date.'}
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        {([['timeIn','Time In'],['breakOut','Break Out'],['breakIn','Break In'],['timeOut','Time Out']] as const).map(([key,label])=>(
+          <div key={key}>
+            <label className="block text-xs text-slate-400 mb-1">{label}</label>
+            <input
+              type="time"
+              className={input}
+              value={form[key] || ''}
+              onChange={e=>setForm({...form,[key]:e.target.value})}
+            />
+          </div>
+        ))}
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3"><div><label className="block text-xs text-slate-400 mb-1">Late Minutes</label><div className={input+" opacity-80"}>{preview?preview.late:0}</div></div><div><label className="block text-xs text-slate-400 mb-1">Work Hours</label><div className={input+" opacity-80"}>{preview?(preview.work/60).toFixed(2):'0.00'}</div></div><div><label className="block text-xs text-slate-400 mb-1">Overtime</label><div className={input+" opacity-80"}>{preview?preview.overtime:0} min</div></div><div><label className="block text-xs text-slate-400 mb-1">Status</label><div className={input+" opacity-80 capitalize"}>{preview?.status||'—'}</div></div></div>
       <p className="text-xs text-slate-500">Calculations use the employee's scheduled duty times. Early arrival does not add work hours; credited work starts at the scheduled Time In. The required scheduled break is always deducted when there is no break or the actual break is shorter. Overtime counts only when it exceeds 30 minutes.</p>
       <div className="flex justify-end gap-2 pt-3 border-t border-slate-800"><button type="button" onClick={()=>setModal(false)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300">Cancel</button><button className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">{editId?'Save Changes':'Add Attendance'}</button></div>

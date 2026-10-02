@@ -96,7 +96,7 @@ export const PayrollManagement: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Payroll Processing</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Calculate earnings, qualify incentives, deduct contributions, and submit for employee approval.
+            Calculate earnings, qualify incentives, deduct contributions, and submit for employee approval. Only Super Admin-approved overtime is included in payroll.
           </p>
         </div>
 
@@ -201,6 +201,7 @@ export const PayrollManagement: React.FC = () => {
                 <th className="py-3 px-4">Days / Rate</th>
                 <th className="py-3 px-4">Basic Pay</th>
                 <th className="py-3 px-4">Incentives</th>
+                <th className="py-3 px-4">Approved OT</th>
                 <th className="py-3 px-4">Deductions</th>
                 <th className="py-3 px-4">Net Salary</th>
                 <th className="py-3 px-4">Employee Approval</th>
@@ -210,7 +211,7 @@ export const PayrollManagement: React.FC = () => {
             <tbody className="divide-y divide-slate-800/80">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-500">
+                  <td colSpan={10} className="py-8 text-center text-slate-500">
                     Computing payroll ledger…
                   </td>
                 </tr>
@@ -240,6 +241,12 @@ export const PayrollManagement: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 font-mono text-emerald-400">
                       ₱{r.incentivePay.toLocaleString()}
+                    </td>
+                    <td className="py-3 px-4 text-xs">
+                      <div className="font-semibold text-cyan-400">{(r.overtimeHours || 0).toFixed(2)} hrs</div>
+                      {(r.pendingOvertimeMinutesTotal || 0) > 0 && (
+                        <div className="text-amber-400">{r.pendingOvertimeMinutesTotal} min pending approval</div>
+                      )}
                     </td>
                     <td className="py-3 px-4 font-mono text-rose-400">
                       -₱{r.totalDeductions.toLocaleString()}

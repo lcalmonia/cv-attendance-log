@@ -83,7 +83,22 @@ function scheduleBreakMinutes(s: any) {
   return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
 }
 function normalizedWorkMinutes(a: any, s: any) {
-  const elapsed = minutesBetweenTimes(a?.time_in, a?.time_out);
+  if (!a?.time_in || !a?.time_out) return 0;
+
+  // Work time never starts before the employee's scheduled Time In.
+  // Early arrival is not extra worked time; late arrival starts from the
+  // actual Time In. This same calculation is used by both portals and payroll.
+  const actualIn = new Date(a.time_in);
+  const actualOut = new Date(a.time_out);
+  const scheduledIn = s?.date && s?.required_time_in
+    ? scheduleDateTime(s.date, s.required_time_in)
+    : null;
+  if (Number.isNaN(actualIn.getTime()) || Number.isNaN(actualOut.getTime()) || actualOut <= actualIn) return 0;
+
+  const effectiveStart = scheduledIn && !Number.isNaN(scheduledIn.getTime()) && scheduledIn > actualIn
+    ? scheduledIn
+    : actualIn;
+  const elapsed = Math.max(0, Math.round((actualOut.getTime() - effectiveStart.getTime()) / 60000));
   const requiredBreak = scheduleBreakMinutes(s);
   const actualBreak = a?.break_out && a?.break_in ? minutesBetweenTimes(a.break_out, a.break_in) : 0;
   const effectiveBreak = Math.max(requiredBreak, actualBreak);
@@ -116,6 +131,27 @@ async function resolveScheduleForAttendance(employeeId: string, date: unknown, p
   );
   return r.rows[0]||null;
 }
+function overtimeMinutes(a: any, s: any) {
+  if (isInvalidShortDuty(a, s) || !s || !s.is_working_day || !a?.time_out || !s.required_time_out || !s.required_time_in) return 0;
+  const scheduledOut = scheduleDateTime(s.date, s.required_time_out, s.required_time_in);
+  const actualOut = new Date(a.time_out);
+  if (!scheduledOut || Number.isNaN(actualOut.getTime())) return 0;
+  const minutes = Math.max(0, Math.round((actualOut.getTime() - scheduledOut.getTime()) / 60000));
+  return minutes > 30 ? minutes : 0;
+}
+
+function overtimeApprovalStatus(a: any, s: any) {
+  const raw = overtimeMinutes(a, s);
+  if (raw <= 0) return 'not_required';
+  return ['pending','approved','rejected'].includes(String(a?.overtime_approval_status || ''))
+    ? String(a.overtime_approval_status)
+    : 'pending';
+}
+
+function approvedOvertimeMinutes(a: any, s: any) {
+  return overtimeApprovalStatus(a, s) === 'approved' ? overtimeMinutes(a, s) : 0;
+}
+
 function attendanceVariance(a: any, s: any) {
   if (!s || !s.is_working_day || isInvalidShortDuty(a, s)) {
     return { lateMinutes: 0, undertimeMinutes: 0, overbreakMinutes: 0, varianceMinutes: 0 };
@@ -231,23 +267,28 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const holidayR=await db.sql`SELECT holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE (business_id=${e.business_id} OR business_id='all') AND holiday_date BETWEEN ${p.start_date} AND ${p.end_date}`;
   const holidayMap=new Map<string, any>(holidayR.rows.map((h:any)=>[String(h.holidayDate).slice(0,10),h]));
   const ndRate=Number(hr.rows[0]?.nightDifferentialHourlyRate||0);
-  let daysWorked=0, late=0, nightDiffMinutes=0, holidayOvertimePay=0;
+  let daysWorked=0, late=0, nightDiffMinutes=0, overtimeMinutesTotal=0, holidayOvertimePay=0;
   const attendanceDays:any[]=[];
   for(const s of duty){
     const a=attendance.find((x:any)=>dateOnly(x.date)===dateOnly(s.date));
     const invalid=isInvalidShortDuty(a,s);
     const present=!!a?.time_in && !invalid;
     const metrics=attendanceVariance(a,s);
-    if(present){daysWorked++; late+=metrics.lateMinutes;}
+    const rawOvertimeMinutes=overtimeMinutes(a,s);
+    const overtimeStatus=overtimeApprovalStatus(a,s);
+    const regularOvertimeMinutes=approvedOvertimeMinutes(a,s);
+    if(present){daysWorked++; late+=metrics.lateMinutes; overtimeMinutesTotal+=regularOvertimeMinutes;}
     const dateKey=dateOnly(s.date), nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
     nightDiffMinutes+=nd;
     const holiday=holidayMap.get(dateKey);
     if(holiday&&present&&a?.time_out){
       const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);
-      holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
+      if(overtimeStatus==='approved' && rawOvertimeMinutes>0){
+        holidayOvertimePay+=Math.round((ot/60)*Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
+      }
     }
     const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
-    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
+    attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus==='pending'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
   const minuteRate=Number(e.daily_rate)/(Math.max(1,Number(e.required_hours_per_day||8))*60);
   const lateDed=Math.round(late*minuteRate*100)/100;
@@ -287,7 +328,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
     employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:Number(e.daily_rate),
-    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
+    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),lateDeduction:lateDed,baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
     finalizedAt:p.status==='finalized'?dateOnly(p.payout_date):undefined,
@@ -539,11 +580,14 @@ async function handle(request: Request) {
       const existing=(await db.sql`SELECT id FROM schedules WHERE employee_id=${e.id} AND payroll_period_id=${p.id} AND date=${date}`).rows[0], id=existing?.id||b.id||`sched_${randomBytes(8).toString('hex')}`;
       if(existing) await db.sql`UPDATE schedules SET required_time_in=${working?b.requiredTimeIn:null},required_time_out=${working?b.requiredTimeOut:null},break_out=${working?(b.breakOut||null):null},break_in=${working?(b.breakIn||null):null},is_working_day=${working},notes=${b.notes||''} WHERE id=${id}`;
       else await db.sql`INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES(${id},${e.id},${p.id},${date},${working?b.requiredTimeIn:null},${working?b.requiredTimeOut:null},${working?(b.breakOut||null):null},${working?(b.breakIn||null):null},${working},${b.notes||''})`;
+      // Any schedule change can change the amount of overtime, so previously
+      // approved overtime for this duty date must be reviewed again.
+      await db.sql`UPDATE attendance SET overtime_approval_status=CASE WHEN time_out IS NOT NULL AND ${working} THEN 'pending' ELSE 'not_required' END,overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE employee_id=${e.id} AND date=${date} AND payroll_period_id=${p.id}`;
       const s=(await db.sql`SELECT * FROM schedules WHERE id=${id}`).rows[0];
       return json({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes});
     }
     if(path.startsWith('admin/schedules/')&&m==='DELETE'&&isAdmin(u)){
-      const id=path.split('/')[2], s=(await db.sql`SELECT payroll_period_id FROM schedules WHERE id=${id}`).rows[0]; if(s){const p=await periodById(s.payroll_period_id); if(p?.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400); await db.sql`DELETE FROM schedules WHERE id=${id}`;} return json({success:true});
+      const id=path.split('/')[2], s=(await db.sql`SELECT employee_id,payroll_period_id,date FROM schedules WHERE id=${id}`).rows[0]; if(s){const p=await periodById(s.payroll_period_id); if(p?.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400); await db.sql`DELETE FROM schedules WHERE id=${id}`; await db.sql`UPDATE attendance SET overtime_approval_status='not_required',overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE employee_id=${s.employee_id} AND date=${s.date} AND payroll_period_id=${s.payroll_period_id}`;} return json({success:true});
     }
     if(path==='admin/attendance'&&m==='GET'&&isAdmin(u)){
       const q=new URL(request.url).searchParams;
@@ -567,6 +611,9 @@ async function handle(request: Request) {
         a.time_out AS "timeOut", a.late_minutes AS "lateMinutes",
         a.total_work_minutes AS "totalWorkMinutes", a.status,
         a.payroll_period_id AS "payrollPeriodId",
+        a.overtime_approval_status AS "overtimeApprovalStatus",
+        a.overtime_reviewed_by AS "overtimeReviewedBy",
+        a.overtime_reviewed_at AS "overtimeReviewedAt",
         e.full_name AS "employeeName", e.employee_id AS "employeeIdCode",
         b.name AS "businessName",
         s.required_time_in AS "requiredTimeIn", s.required_time_out AS "requiredTimeOut",
@@ -599,12 +646,15 @@ async function handle(request: Request) {
           break_in:x.breakIn,
           time_out:x.timeOut,
           late_minutes:x.lateMinutes,
-          total_work_minutes:x.totalWorkMinutes
+          total_work_minutes:x.totalWorkMinutes,
+          overtime_approval_status:x.overtimeApprovalStatus,
+          overtime_reviewed_by:x.overtimeReviewedBy,
+          overtime_reviewed_at:x.overtimeReviewedAt
         };
         const s={date:x.date,required_time_in:x.requiredTimeIn,required_time_out:x.requiredTimeOut,break_out:x.scheduleBreakOut,break_in:x.scheduleBreakIn,is_working_day:x.isWorkingDay};
         const invalid=isInvalidShortDuty(calculationRow,s);
         const v=attendanceVariance(calculationRow,s);
-        return {...x,date:dateOnly(x.date),lateMinutes:v.lateMinutes,undertimeMinutes:v.undertimeMinutes,overbreakMinutes:v.overbreakMinutes,varianceMinutes:v.varianceMinutes,totalWorkMinutes:calculationRow.time_in&&calculationRow.time_out?normalizedWorkMinutes(calculationRow,s):Number(x.totalWorkMinutes||0),status:invalid?'invalid':x.status};
+        return {...x,date:dateOnly(x.date),lateMinutes:v.lateMinutes,undertimeMinutes:v.undertimeMinutes,overbreakMinutes:v.overbreakMinutes,varianceMinutes:v.varianceMinutes,overtimeMinutes:overtimeMinutes(calculationRow,s),overtimeApprovalStatus:overtimeApprovalStatus(calculationRow,s),totalWorkMinutes:calculationRow.time_in&&calculationRow.time_out?normalizedWorkMinutes(calculationRow,s):Number(x.totalWorkMinutes||0),status:invalid?'invalid':x.status};
       }));
     }
     if(path==='admin/settings'&&m==='GET'&&isAdmin(u)){
@@ -649,8 +699,26 @@ async function handle(request: Request) {
       const invalid=isInvalidShortDuty(draft,schedule);
       const status=invalid?'present':(ti?(late>0?'late':'present'):'absent');
       const id=b.id||`att_${randomBytes(8).toString('hex')}`;
-      await db.sql`INSERT INTO attendance(id,employee_id,business_id,payroll_period_id,date,time_in,break_out,break_in,time_out,late_minutes,total_work_minutes,status) VALUES(${id},${e.id},${e.business_id},${schedule?.payroll_period_id||b.payrollPeriodId||null},${b.date},${ti},${bo},${bi},${to},${late},${work},${status}) ON CONFLICT(employee_id,date) DO UPDATE SET business_id=EXCLUDED.business_id,payroll_period_id=EXCLUDED.payroll_period_id,time_in=EXCLUDED.time_in,break_out=EXCLUDED.break_out,break_in=EXCLUDED.break_in,time_out=EXCLUDED.time_out,late_minutes=EXCLUDED.late_minutes,total_work_minutes=EXCLUDED.total_work_minutes,status=EXCLUDED.status,updated_at=NOW()`;
+      const draftOvertime=overtimeMinutes(draft,schedule);
+      const approvalStatus=draftOvertime>0?'pending':'not_required';
+      await db.sql`INSERT INTO attendance(id,employee_id,business_id,payroll_period_id,date,time_in,break_out,break_in,time_out,late_minutes,total_work_minutes,status,overtime_approval_status,overtime_reviewed_by,overtime_reviewed_at) VALUES(${id},${e.id},${e.business_id},${schedule?.payroll_period_id||b.payrollPeriodId||null},${b.date},${ti},${bo},${bi},${to},${late},${work},${status},${approvalStatus},NULL,NULL) ON CONFLICT(employee_id,date) DO UPDATE SET business_id=EXCLUDED.business_id,payroll_period_id=EXCLUDED.payroll_period_id,time_in=EXCLUDED.time_in,break_out=EXCLUDED.break_out,break_in=EXCLUDED.break_in,time_out=EXCLUDED.time_out,late_minutes=EXCLUDED.late_minutes,total_work_minutes=EXCLUDED.total_work_minutes,status=EXCLUDED.status,overtime_approval_status=EXCLUDED.overtime_approval_status,overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW()`;
       return json({success:true,id});
+    }
+    if(path.startsWith('admin/attendance/')&&path.endsWith('/overtime-approval')&&m==='POST'&&isAdmin(u)){
+      const parts=path.split('/'), id=parts[2], b=await request.json();
+      const decision=String(b.status||'');
+      if(!['approved','rejected'].includes(decision))return json({error:'Overtime approval status must be approved or rejected.'},400);
+      const a=(await db.sql`SELECT * FROM attendance WHERE id=${id}`).rows[0];
+      if(!a)return json({error:'Attendance record not found.'},404);
+      const s=await resolveScheduleForAttendance(a.employee_id,a.date,a.payroll_period_id||null);
+      const rawOvertime=overtimeMinutes(a,s);
+      if(rawOvertime<=0)return json({error:'This attendance record has no qualifying overtime to approve.'},400);
+      const p=a.payroll_period_id?await periodById(a.payroll_period_id):null;
+      if(!p)return json({error:'Payroll period not found for this attendance record.'},404);
+      if(p.status==='finalized')return json({error:'Overtime cannot be changed after the payroll period is finalized.'},400);
+      const now=new Date().toISOString();
+      await db.sql`UPDATE attendance SET overtime_approval_status=${decision},overtime_reviewed_by=${u.userId},overtime_reviewed_at=${now},updated_at=NOW() WHERE id=${id}`;
+      return json({success:true,status:decision,reviewedAt:now});
     }
     if(path.startsWith('admin/attendance/')&&m==='DELETE'&&isAdmin(u)){
       const id=path.split('/')[2];
@@ -670,7 +738,9 @@ async function handle(request: Request) {
       const derivedWork=n.timeIn&&n.timeOut&&schedule?normalizedWorkMinutes(draft,schedule):0;
       const invalid=isInvalidShortDuty(draft,schedule);
       const derivedStatus=invalid?'present':(n.timeIn?(derivedLate>0?'late':'present'):'absent');
-      await db.sql`UPDATE attendance SET payroll_period_id=${schedule?.payroll_period_id||b.payrollPeriodId||a.payroll_period_id||null},time_in=${n.timeIn},break_out=${n.breakOut},break_in=${n.breakIn},time_out=${n.timeOut},late_minutes=${derivedLate},total_work_minutes=${derivedWork},status=${derivedStatus},updated_at=NOW() WHERE id=${id}`;
+      const derivedOvertime=overtimeMinutes(draft,schedule);
+       const approvalStatus=derivedOvertime>0?'pending':'not_required';
+       await db.sql`UPDATE attendance SET payroll_period_id=${schedule?.payroll_period_id||b.payrollPeriodId||a.payroll_period_id||null},time_in=${n.timeIn},break_out=${n.breakOut},break_in=${n.breakIn},time_out=${n.timeOut},late_minutes=${derivedLate},total_work_minutes=${derivedWork},status=${derivedStatus},overtime_approval_status=${approvalStatus},overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE id=${id}`;
       return json({success:true,id});
     }
     if(path==='admin/deductions/types'&&m==='GET'&&isAdmin(u)){const r=await db.sql`SELECT id,business_id AS "businessId",name,calculation_type AS "calculationType",value,recurring,status FROM deduction_types ORDER BY name`;return json(r.rows.map((x:any)=>({...x,value:Number(x.value)})));}
@@ -692,7 +762,7 @@ async function handle(request: Request) {
       if(!a){
         const open=(await db.sql`SELECT a.*,s.id AS schedule_id,s.payroll_period_id,s.required_time_in,s.required_time_out,s.break_out AS schedule_break_out,s.break_in AS schedule_break_in,s.is_working_day,s.notes FROM attendance a JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id WHERE a.employee_id=${e.id} AND a.time_in IS NOT NULL AND a.time_out IS NULL AND s.is_working_day=true AND s.required_time_out < s.required_time_in ORDER BY a.date DESC LIMIT 1`).rows[0];
         if(open){a=open;s=(await db.sql`SELECT * FROM schedules WHERE id=${open.schedule_id}`).rows[0];}
-      }const todayMetrics=attendanceVariance(a,s);const todayInvalid=isInvalidShortDuty(a,s);return json({employeeName:e.full_name,employeeId:e.employee_id,position:e.position,businessName:biz?.name||'',todaySchedule:s?{id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes}:{isWorkingDay:false,notes:'No schedule assigned'},todayAttendance:a?{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:todayMetrics.lateMinutes,totalWorkMinutes:a.time_in&&a.time_out&&s?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:todayInvalid?'invalid':(a.time_in?(todayMetrics.lateMinutes>0?'late':'present'):a.status)}:null,currentServerTime:new Date().toISOString()});}
+      }const todayMetrics=attendanceVariance(a,s);const todayInvalid=isInvalidShortDuty(a,s);return json({employeeName:e.full_name,employeeId:e.employee_id,position:e.position,businessName:biz?.name||'',todaySchedule:s?{id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes}:{isWorkingDay:false,notes:'No schedule assigned'},todayAttendance:a?{id:a.id,employeeId:a.employee_id,businessId:a.business_id,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:todayMetrics.lateMinutes,overtimeMinutes:overtimeMinutes(a,s),overtimeApprovalStatus:overtimeApprovalStatus(a,s),totalWorkMinutes:a.time_in&&a.time_out&&s?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:todayInvalid?'invalid':(a.time_in?(todayMetrics.lateMinutes>0?'late':'present'):a.status)}:null,currentServerTime:new Date().toISOString()});}
     if(path==='employee/clock'&&m==='POST'&&isEmployee(u)){
       const e=await employeeById(u.employeeDbId); if(!e)return json({error:'Employee record not found.'},404);
       const b=await request.json(); if(!['time_in','break_out','break_in','time_out'].includes(b.action))return json({error:'Invalid clock action.'},400);
@@ -729,12 +799,14 @@ async function handle(request: Request) {
         if(a.break_out&&!a.break_in)return json({error:'Please complete your break before timing out.'},400);
         const work=normalizedWorkMinutes({...a,time_out:ph.iso},s);
         const finalMetrics=attendanceVariance({...a,time_out:ph.iso},s);
-        await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${finalMetrics.lateMinutes>0?'late':'present'},updated_at=NOW() WHERE id=${a.id}`;
+        const clockOvertime=overtimeMinutes({...a,time_out:ph.iso},s);
+        const approvalStatus=clockOvertime>0?'pending':'not_required';
+        await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${finalMetrics.lateMinutes>0?'late':'present'},overtime_approval_status=${approvalStatus},overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE id=${a.id}`;
       }
       a=(await db.sql`SELECT * FROM attendance WHERE id=${a.id}`).rows[0];
       const responseMetrics=attendanceVariance(a,s);
       const responseInvalid=isInvalidShortDuty(a,s);
-      return json({success:true,attendance:{id:a.id,employeeId:a.employee_id,businessId:a.business_id,payrollPeriodId:a.payroll_period_id||undefined,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:responseMetrics.lateMinutes,totalWorkMinutes:a.time_in&&a.time_out&&s?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:responseInvalid?'invalid':a.status}});
+      return json({success:true,attendance:{id:a.id,employeeId:a.employee_id,businessId:a.business_id,payrollPeriodId:a.payroll_period_id||undefined,date:dateOnly(a.date),timeIn:a.time_in||undefined,breakOut:a.break_out||undefined,breakIn:a.break_in||undefined,timeOut:a.time_out||undefined,lateMinutes:responseMetrics.lateMinutes,overtimeMinutes:overtimeMinutes(a,s),overtimeApprovalStatus:overtimeApprovalStatus(a,s),totalWorkMinutes:a.time_in&&a.time_out&&s?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),status:responseInvalid?'invalid':a.status}});
     }
     if(path==='employee/periods'&&m==='GET'&&isEmployee(u)){
       const r=await db.sql`SELECT id,name,start_date AS "startDate",end_date AS "endDate",payout_date AS "payoutDate",status FROM payroll_periods ORDER BY start_date DESC`;
@@ -801,6 +873,8 @@ async function handle(request: Request) {
             undertimeMinutes:v.undertimeMinutes,
             overbreakMinutes:v.overbreakMinutes,
             varianceMinutes:v.varianceMinutes,
+            overtimeMinutes:overtimeMinutes(a,s),
+            overtimeApprovalStatus:overtimeApprovalStatus(a,s),
             totalWorkMinutes:a.time_in&&a.time_out?normalizedWorkMinutes(a,s):Number(a.total_work_minutes||0),
             status:invalid?'invalid':a.status,
             scheduledTime:a.is_working_day?`${a.required_time_in} - ${a.required_time_out}`:'OFF'

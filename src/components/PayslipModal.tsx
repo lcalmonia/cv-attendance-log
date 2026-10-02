@@ -134,24 +134,18 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                 Deductions
               </div>
               <div className="space-y-2 text-xs">
-                {record.lateMinutesTotal > 0 && (
-                  <div className="flex justify-between text-amber-400 print:text-amber-700">
-                    <span>Late Deduction ({record.lateMinutesTotal} mins)</span>
-                    <span className="font-mono">-₱{record.lateDeduction.toLocaleString()}</span>
-                  </div>
-                )}
-                {(record.overbreakMinutesTotal||0) > 0 && (
-                  <div className="flex justify-between text-amber-400 print:text-amber-700">
-                    <span>Overbreak Deduction ({record.overbreakMinutesTotal} mins)</span>
-                    <span className="font-mono">-₱{(record.overbreakDeduction||0).toLocaleString()}</span>
-                  </div>
-                )}
-                {(record.undertimeMinutesTotal||0) > 0 && (
-                  <div className="flex justify-between text-amber-400 print:text-amber-700">
-                    <span>Undertime Deduction ({record.undertimeMinutesTotal} mins)</span>
-                    <span className="font-mono">-₱{(record.undertimeDeduction||0).toLocaleString()}</span>
-                  </div>
-                )}
+                <div className="flex justify-between text-amber-400 print:text-amber-700">
+                  <span>Late Deduction ({record.lateMinutesTotal||0} mins)</span>
+                  <span className="font-mono">-₱{(record.lateDeduction||0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-amber-400 print:text-amber-700">
+                  <span>Overbreak Deduction ({record.overbreakMinutesTotal||0} mins)</span>
+                  <span className="font-mono">-₱{(record.overbreakDeduction||0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-amber-400 print:text-amber-700">
+                  <span>Undertime Deduction ({record.undertimeMinutesTotal||0} mins)</span>
+                  <span className="font-mono">-₱{(record.undertimeDeduction||0).toLocaleString()}</span>
+                </div>
 
                 {record.breakdown.deductions.length === 0 ? (
                   <div className="text-slate-500 italic">No deductions applied</div>

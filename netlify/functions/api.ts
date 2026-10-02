@@ -268,10 +268,12 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
   const ar=await db.sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY date`;
   const attendance=ar.rows;
-  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${e.business_id} OR business_id='all' ORDER BY CASE WHEN business_id=${e.business_id} THEN 0 ELSE 1 END LIMIT 1`;
+  const hr=await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate", night_differential_multiplier AS "nightDifferentialMultiplier", regular_overtime_multiplier AS "regularOvertimeMultiplier" FROM payroll_settings WHERE business_id=${e.business_id} OR business_id='all' ORDER BY CASE WHEN business_id=${e.business_id} THEN 0 ELSE 1 END LIMIT 1`;
   const holidayR=await db.sql`SELECT holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE (business_id=${e.business_id} OR business_id='all') AND holiday_date BETWEEN ${p.start_date} AND ${p.end_date}`;
   const holidayMap=new Map<string, any>(holidayR.rows.map((h:any)=>[String(h.holidayDate).slice(0,10),h]));
   const ndRate=Number(hr.rows[0]?.nightDifferentialHourlyRate||0);
+  const ndMultiplier=Number(hr.rows[0]?.nightDifferentialMultiplier ?? 1);
+  const regularOtMultiplier=Number(hr.rows[0]?.regularOvertimeMultiplier ?? 1);
   const rateSnapshot=p.status==='finalized'
     ? (await db.sql`SELECT daily_rate AS "dailyRate" FROM payroll_rate_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
     : null;
@@ -308,7 +310,8 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   }
   const overbreakDed=Math.round(overbreak*minuteRate*100)/100;
   const undertimeDed=Math.round(undertime*minuteRate*100)/100;
-  const regularOvertimePay=0;
+  const hourlyRate=payrollDailyRate/Math.max(1,Number(e.required_hours_per_day||8));
+  const regularOvertimePay=Math.round((overtimeMinutesTotal/60)*hourlyRate*regularOtMultiplier*100)/100;
   const baseDutyPay=Math.round(daysWorked*payrollDailyRate*100)/100;
   const basic=Math.round((baseDutyPay-lateDed-overbreakDed-undertimeDed)*100)/100;
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
@@ -338,7 +341,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     });
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
-  const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
+  const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*ndMultiplier*100)/100;
   const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
   const deductionSnapshotHeader=p.status==='finalized'
     ? (await db.sql`SELECT 1 FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
@@ -366,7 +369,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
     employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:payrollDailyRate,
-    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overbreakMinutesTotal:overbreak,undertimeMinutesTotal:undertime,lateDeduction:lateDed,overbreakDeduction:overbreakDed,undertimeDeduction:undertimeDed,regularOvertimePay,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
+    scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overbreakMinutesTotal:overbreak,undertimeMinutesTotal:undertime,lateDeduction:lateDed,overbreakDeduction:overbreakDed,undertimeDeduction:undertimeDed,regularOvertimePay,regularOvertimeMultiplier:regularOtMultiplier,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:ndRate,nightDifferentialMultiplier:ndMultiplier,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,
     finalizedAt:p.status==='finalized'?dateOnly(p.payout_date):undefined,
@@ -701,9 +704,9 @@ async function handle(request: Request) {
     }
     if(path==='admin/settings'&&m==='GET'&&isAdmin(u)){
       const biz=new URL(request.url).searchParams.get('businessId')||'all';
-      const s=(await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate" FROM payroll_settings WHERE business_id=${biz} OR business_id='all' ORDER BY CASE WHEN business_id=${biz} THEN 0 ELSE 1 END LIMIT 1`).rows[0];
+      const s=(await db.sql`SELECT night_differential_hourly_rate AS "nightDifferentialHourlyRate",night_differential_multiplier AS "nightDifferentialMultiplier",regular_overtime_multiplier AS "regularOvertimeMultiplier" FROM payroll_settings WHERE business_id=${biz} OR business_id='all' ORDER BY CASE WHEN business_id=${biz} THEN 0 ELSE 1 END LIMIT 1`).rows[0];
       const h=(await db.sql`SELECT id,business_id AS "businessId",holiday_date AS "holidayDate",name,holiday_type AS "holidayType",overtime_rate AS "overtimeRate" FROM holidays WHERE business_id=${biz} OR business_id='all' ORDER BY holiday_date`).rows;
-      return json({businessId:biz,nightDifferentialHourlyRate:Number(s?.nightDifferentialHourlyRate||0),holidays:h.map((x:any)=>({...x,holidayDate:String(x.holidayDate).slice(0,10),overtimeRate:Number(x.overtimeRate)}))});
+      return json({businessId:biz,nightDifferentialHourlyRate:Number(s?.nightDifferentialHourlyRate||0),nightDifferentialMultiplier:Number(s?.nightDifferentialMultiplier??1),regularOvertimeMultiplier:Number(s?.regularOvertimeMultiplier??1),holidays:h.map((x:any)=>({...x,holidayDate:String(x.holidayDate).slice(0,10),overtimeRate:Number(x.overtimeRate)}))});
     }
     if(path==='admin/settings'&&m==='PUT'&&isAdmin(u)){
       const b=await request.json(), biz=String(b.businessId||'all'), rate=Number(b.nightDifferentialHourlyRate||0);

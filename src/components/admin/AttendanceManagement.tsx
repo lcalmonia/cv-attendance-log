@@ -20,6 +20,19 @@ export const AttendanceManagement: React.FC = () => {
   const timeMinutes=(time:string)=>{const [h,m]=time.split(':').map(Number);return h*60+m;};
   const minutesBetween=(start?:string,end?:string)=>{if(!start||!end)return 0;return Math.max(0,(timeMinutes(end)-timeMinutes(start)+1440)%1440);};
   const scheduleDateTime=(date:string,time?:string,overnightFrom?:string)=>{if(!date||!time)return null;const base=new Date(date+'T'+time+':00+08:00');if(Number.isNaN(base.getTime()))return null;if(overnightFrom&&timeMinutes(time)<timeMinutes(overnightFrom))base.setUTCDate(base.getUTCDate()+1);return base;};
+  const elapsedFromDutyStart=(start?:string,end?:string,dutyStart?:string)=>{
+    if(!start||!end)return 0;
+    const anchor=dutyStart||start;
+    const startMinutes=timeMinutes(start),endMinutes=timeMinutes(end),anchorMinutes=timeMinutes(anchor);
+    const absoluteStart=startMinutes<anchorMinutes?startMinutes+1440:startMinutes;
+    const absoluteEnd=endMinutes<anchorMinutes?endMinutes+1440:endMinutes;
+    return Math.max(0,absoluteEnd-absoluteStart);
+  };
+  const timeAfterDutyStart=(time?:string,dutyStart?:string)=>{
+    if(!time||!dutyStart)return null;
+    const value=timeMinutes(time),anchor=timeMinutes(dutyStart);
+    return value<anchor?value+1440:value;
+  };
   const buildAttendanceTimes=(dutyDate:string,values:{timeIn?:string;breakOut?:string;breakIn?:string;timeOut?:string})=>{
     const result:{timeIn:string|null;breakOut:string|null;breakIn:string|null;timeOut:string|null}={timeIn:null,breakOut:null,breakIn:null,timeOut:null};
     let currentDate=dutyDate;
@@ -35,7 +48,45 @@ export const AttendanceManagement: React.FC = () => {
     return result;
   };
   useEffect(()=>{if(!modal||!selectedPeriodId||!form.employeeId||!form.date){setSchedule(null);return;}api.admin.getSchedules(selectedPeriodId,form.employeeId).then(list=>setSchedule(list.find(s=>s.date===form.date)||null)).catch(()=>setSchedule(null));},[modal,selectedPeriodId,form.employeeId,form.date]);
-  const preview=(()=>{if(!schedule)return null;const times=buildAttendanceTimes(form.date,form);const actualIn=times.timeIn?new Date(times.timeIn):null,actualOut=times.timeOut?new Date(times.timeOut):null;const scheduledIn=scheduleDateTime(form.date,schedule.requiredTimeIn);const scheduledOut=scheduleDateTime(form.date,schedule.requiredTimeOut,schedule.requiredTimeIn);const late=actualIn&&scheduledIn?Math.max(0,Math.round((actualIn.getTime()-scheduledIn.getTime())/60000)):0;const actualBreak=times.breakOut&&times.breakIn?Math.max(0,Math.round((new Date(times.breakIn).getTime()-new Date(times.breakOut).getTime())/60000)):0;const requiredBreak=minutesBetween(schedule.breakOut,schedule.breakIn);const work=actualIn&&actualOut?Math.max(0,Math.round((actualOut.getTime()-actualIn.getTime())/60000)-Math.max(requiredBreak,actualBreak)):0;const outDiff=actualOut&&scheduledOut?Math.max(0,Math.round((actualOut.getTime()-scheduledOut.getTime())/60000)):0;const overtime=outDiff>30?outDiff:0;return {late,work,overtime,status:!form.timeIn?'absent':work<60&&form.timeIn&&form.timeOut?'invalid':late>0?'late':'present'};})();
+  const preview=(()=>{
+    if(!schedule)return null;
+    const actualInMinutes=form.timeIn?timeMinutes(form.timeIn):null;
+    const actualOutMinutes=form.timeOut?timeMinutes(form.timeOut):null;
+    const requiredInMinutes=schedule.requiredTimeIn?timeMinutes(schedule.requiredTimeIn):null;
+    const requiredOutMinutes=schedule.requiredTimeOut?timeMinutes(schedule.requiredTimeOut):null;
+    const requiredBreak=minutesBetween(schedule.breakOut,schedule.breakIn);
+    const actualBreak=form.breakOut&&form.breakIn?minutesBetween(form.breakOut,form.breakIn):0;
+
+    // Always deduct the scheduled/required break. If the employee takes no
+    // break or takes a shorter break, the full required break is still deducted.
+    // If the employee takes a longer break, deduct the actual longer break.
+    const effectiveBreak=Math.max(requiredBreak,actualBreak);
+    const late=actualInMinutes!==null&&requiredInMinutes!==null
+      ?Math.max(0,actualInMinutes-requiredInMinutes)
+      :0;
+    const work=actualInMinutes!==null&&actualOutMinutes!==null
+      ?Math.max(0,elapsedFromDutyStart(form.timeIn,form.timeOut,schedule.requiredTimeIn)-effectiveBreak)
+      :0;
+
+    const scheduledOutAbsolute=requiredOutMinutes!==null&&requiredInMinutes!==null
+      ?timeAfterDutyStart(schedule.requiredTimeOut,schedule.requiredTimeIn)
+      :null;
+    const actualOutAbsolute=actualOutMinutes!==null&&requiredInMinutes!==null
+      ?timeAfterDutyStart(form.timeOut,schedule.requiredTimeIn)
+      :null;
+    const outDiff=scheduledOutAbsolute!==null&&actualOutAbsolute!==null
+      ?Math.max(0,actualOutAbsolute-scheduledOutAbsolute)
+      :0;
+    const overtime=outDiff>30?outDiff:0;
+
+    return {
+      late,
+      work,
+      overtime,
+      requiredBreak,
+      status:!form.timeIn?'absent':work<60&&form.timeOut?'invalid':late>0?'late':'present'
+    };
+  })();
   const save=async(e:React.FormEvent)=>{e.preventDefault();try{const selectedPeriod=periods.find(p=>p.id===selectedPeriodId);if(!selectedPeriod)throw new Error('Please select a payroll cut-off period.');if(form.date<selectedPeriod.startDate||form.date>selectedPeriod.endDate)throw new Error('The attendance date must be within the selected payroll cut-off period.');const times=buildAttendanceTimes(form.date,form);const payload={employeeId:form.employeeId,date:form.date,payrollPeriodId:selectedPeriodId,...times};if(editId)await api.admin.updateAttendance(editId,payload);else await api.admin.addAttendance(payload);setModal(false);await loadAttendance();}catch(err:any){alert(err.message||'Unable to save attendance.')}};
   const deleteAttendance = async (record: Row) => {
     if (!confirm(`Delete the attendance record for ${record.employeeName} on ${record.date}? This action cannot be undone.`)) return;
@@ -61,9 +112,13 @@ export const AttendanceManagement: React.FC = () => {
     {modal&&<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80"><div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-xl shadow-2xl"><div className="flex items-center justify-between p-4 border-b border-slate-800"><h2 className="font-semibold text-white">{editId?'Edit Attendance':'Add Attendance'}</h2><button onClick={()=>setModal(false)}><X className="w-5 h-5 text-slate-400"/></button></div><form onSubmit={save} className="p-4 space-y-3">
       {!editId&&<div><label className="block text-xs text-slate-400 mb-1">Employee</label><select required className={input} value={form.employeeId} onChange={e=>setForm({...form,employeeId:e.target.value})}>{employees.map(e=><option key={e.id} value={e.id}>{e.fullName} ({e.employeeId})</option>)}</select></div>}
       <div><label className="block text-xs text-slate-400 mb-1">Duty Date</label><input required type="date" className={input} value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></div>
-      <div className="grid grid-cols-2 gap-3">{[['timeIn','Time In'],['breakOut','Break Out'],['breakIn','Break In'],['timeOut','Time Out']].map(([k,l])=><div key={k}><label className="block text-xs text-slate-400 mb-1">{l}</label><input type="time" className={input} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></div>)}</div>
-      <div className="grid grid-cols-4 gap-3"><div><label className="block text-xs text-slate-400 mb-1">Late Minutes</label><div className={input+" opacity-80"}>{preview?preview.late:0}</div></div><div><label className="block text-xs text-slate-400 mb-1">Work Hours</label><div className={input+" opacity-80"}>{preview?(preview.work/60).toFixed(2):'0.00'}</div></div><div><label className="block text-xs text-slate-400 mb-1">Overtime</label><div className={input+" opacity-80"}>{preview?preview.overtime:0} min</div></div><div><label className="block text-xs text-slate-400 mb-1">Status</label><div className={input+" opacity-80 capitalize"}>{preview?.status||'—'}</div></div></div>
-      <p className="text-xs text-slate-500">Late minutes, work hours, overtime, and status are calculated automatically from the schedule and entered times. Overtime counts only when it exceeds 30 minutes.</p>
+      <div className="rounded-lg bg-slate-950/70 border border-slate-800 px-3 py-2 text-xs text-slate-400">
+        {schedule?.isWorkingDay
+          ? <>Scheduled duty: <span className="font-semibold text-slate-200">{schedule.requiredTimeIn} – {schedule.requiredTimeOut}</span>{schedule.breakOut&&schedule.breakIn?<><span className="mx-2 text-slate-600">•</span>Required break: <span className="font-semibold text-slate-200">{schedule.breakOut} – {schedule.breakIn} ({minutesBetween(schedule.breakOut,schedule.breakIn)} min)</span></>:<span className="ml-2 text-amber-400">• No required break is configured for this schedule</span>}</>
+          : 'No working schedule found for this date.'}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3"><div><label className="block text-xs text-slate-400 mb-1">Late Minutes</label><div className={input+" opacity-80"}>{preview?preview.late:0}</div></div><div><label className="block text-xs text-slate-400 mb-1">Work Hours</label><div className={input+" opacity-80"}>{preview?(preview.work/60).toFixed(2):'0.00'}</div></div><div><label className="block text-xs text-slate-400 mb-1">Overtime</label><div className={input+" opacity-80"}>{preview?preview.overtime:0} min</div></div><div><label className="block text-xs text-slate-400 mb-1">Status</label><div className={input+" opacity-80 capitalize"}>{preview?.status||'—'}</div></div></div>
+      <p className="text-xs text-slate-500">Calculations use the employee's scheduled duty times. The required scheduled break is always deducted from total work time when there is no break or the actual break is shorter. Overtime counts only when it exceeds 30 minutes.</p>
       <div className="flex justify-end gap-2 pt-3 border-t border-slate-800"><button type="button" onClick={()=>setModal(false)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300">Cancel</button><button className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium">{editId?'Save Changes':'Add Attendance'}</button></div>
     </form></div></div>}
   </div>;

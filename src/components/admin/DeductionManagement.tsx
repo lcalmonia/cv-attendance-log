@@ -14,6 +14,7 @@ export const DeductionManagement: React.FC = () => {
 
   // Common Modal State
   const [commonModalOpen, setCommonModalOpen] = useState(false);
+  const [editingCommonId, setEditingCommonId] = useState<string | null>(null);
   const [commonForm, setCommonForm] = useState({
     businessId: 'all',
     name: '',
@@ -25,6 +26,7 @@ export const DeductionManagement: React.FC = () => {
 
   // Employee Modal State
   const [empModalOpen, setEmpModalOpen] = useState(false);
+  const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
   const [empForm, setEmpForm] = useState({
     employeeId: '',
     deductionName: '',
@@ -74,7 +76,11 @@ export const DeductionManagement: React.FC = () => {
     if (!commonForm.name) return;
     setBusy(true);
     try {
-      await api.admin.createDeductionType(commonForm);
+      if (editingCommonId) {
+        await api.admin.updateDeductionType(editingCommonId, commonForm);
+      } else {
+        await api.admin.createDeductionType(commonForm);
+      }
       setCommonModalOpen(false);
       loadData();
     } catch (err: any) {
@@ -89,7 +95,11 @@ export const DeductionManagement: React.FC = () => {
     if (!empForm.employeeId || !empForm.deductionName) return;
     setBusy(true);
     try {
-      await api.admin.createEmployeeDeduction(empForm);
+      if (editingEmpId) {
+        await api.admin.updateEmployeeDeduction(editingEmpId, empForm);
+      } else {
+        await api.admin.createEmployeeDeduction(empForm);
+      }
       setEmpModalOpen(false);
       loadData();
     } catch (err: any) {
@@ -97,6 +107,32 @@ export const DeductionManagement: React.FC = () => {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleEditCommon = (type: DeductionType) => {
+    setEditingCommonId(type.id);
+    setCommonForm({
+      businessId: type.businessId,
+      name: type.name,
+      calculationType: type.calculationType,
+      value: Number(type.value),
+      recurring: type.recurring,
+      status: type.status,
+    });
+    setCommonModalOpen(true);
+  };
+
+  const handleEditEmpDeduction = (deduction: EmployeeDeduction & { employeeName: string }) => {
+    setEditingEmpId(deduction.id);
+    setEmpForm({
+      employeeId: deduction.employeeId,
+      deductionName: deduction.deductionName,
+      amount: Number(deduction.amount),
+      payrollPeriodId: deduction.payrollPeriodId || periods[0]?.id || '',
+      recurring: deduction.recurring,
+      status: deduction.status,
+    });
+    setEmpModalOpen(true);
   };
 
   const handleDeleteCommon = async (id: string) => {
@@ -143,6 +179,7 @@ export const DeductionManagement: React.FC = () => {
         <button
           onClick={() => {
             if (activeTab === 'common') {
+              setEditingCommonId(null);
               setCommonForm({
                 businessId: 'all',
                 name: '',
@@ -153,6 +190,7 @@ export const DeductionManagement: React.FC = () => {
               });
               setCommonModalOpen(true);
             } else {
+              setEditingEmpId(null);
               setEmpForm({
                 employeeId: employees[0]?.id || '',
                 deductionName: '',
@@ -269,6 +307,7 @@ export const DeductionManagement: React.FC = () => {
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -343,6 +382,14 @@ export const DeductionManagement: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleEditEmpDeduction(ed)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 transition"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleDeleteEmpDeduction(ed.id)}
                             className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-red-400 transition"
@@ -350,6 +397,7 @@ export const DeductionManagement: React.FC = () => {
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -366,7 +414,7 @@ export const DeductionManagement: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-800">
-              <h3 className="font-semibold text-white">Create Recurring Common Deduction</h3>
+              <h3 className="font-semibold text-white">{editingCommonId ? 'Edit Common Deduction' : 'Create Recurring Common Deduction'}</h3>
               <button onClick={() => setCommonModalOpen(false)} className="p-1 text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
@@ -463,7 +511,7 @@ export const DeductionManagement: React.FC = () => {
                   disabled={busy}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60"
                 >
-                  {busy ? 'Saving…' : 'Create Deduction'}
+                  {busy ? 'Saving…' : editingCommonId ? 'Save Changes' : 'Create Deduction'}
                 </button>
               </div>
             </form>
@@ -476,7 +524,7 @@ export const DeductionManagement: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-800">
-              <h3 className="font-semibold text-white">Create Employee-Specific Deduction</h3>
+              <h3 className="font-semibold text-white">{editingEmpId ? 'Edit Employee Deduction' : 'Create Employee-Specific Deduction'}</h3>
               <button onClick={() => setEmpModalOpen(false)} className="p-1 text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
@@ -573,7 +621,7 @@ export const DeductionManagement: React.FC = () => {
                   disabled={busy}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60"
                 >
-                  {busy ? 'Saving…' : 'Add Deduction'}
+                  {busy ? 'Saving…' : editingEmpId ? 'Save Changes' : 'Add Deduction'}
                 </button>
               </div>
             </form>

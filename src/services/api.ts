@@ -189,7 +189,7 @@ export const api = {
     getPayroll: (periodId: string) =>
       request<{ period: PayrollPeriod; records: PayrollRecord[] }>(`/api/admin/payroll/${periodId}`),
     getSettings: (businessId?: string) => request<PayrollSettings>(`/api/admin/settings${businessId ? `?businessId=${encodeURIComponent(businessId)}` : ''}`),
-    updateSettings: (data: { businessId: string; nightDifferentialHourlyRate: number; nightDifferentialMultiplier: number; regularOvertimeMultiplier: number }) => request<{ success: boolean }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+    updateSettings: (data: { businessId: string; nightDifferentialMultiplier: number; regularOvertimeMultiplier: number }) => request<{ success: boolean }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
     createHoliday: (data: any) => request<{ success: boolean; id: string }>('/api/admin/holidays', { method: 'POST', body: JSON.stringify(data) }),
     updateHoliday: (id: string, data: any) => request<{ success: boolean }>(`/api/admin/holidays/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteHoliday: (id: string) => request<{ success: boolean }>(`/api/admin/holidays/${id}`, { method: 'DELETE' }),

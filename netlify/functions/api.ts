@@ -259,6 +259,11 @@ async function employeePayrollPeriods() {
 async function calculatePayroll(employeeId:string, periodId:string) {
   const e=await employeeById(employeeId), p=await periodById(periodId);
   if(!e||!p) throw new Error('Employee or payroll period not found.');
+  if(p.status==='finalized'){
+    const frozen=await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`;
+    const record=frozen.rows[0]?.payrollRecord;
+    if(record) return typeof record==='string' ? JSON.parse(record) : record;
+  }
   const sr=await db.sql`SELECT * FROM schedules WHERE employee_id=${employeeId} AND payroll_period_id=${periodId} ORDER BY date`;
   const schedules=sr.rows, duty=schedules.filter((s:any)=>s.is_working_day);
   const ar=await db.sql`SELECT * FROM attendance WHERE employee_id=${employeeId} AND date BETWEEN ${p.start_date} AND ${p.end_date} ORDER BY date`;
@@ -789,6 +794,7 @@ async function handle(request: Request) {
           if(!locked)throw new Error('Payroll period not found.');
           if(locked.status==='finalized')throw new Error('Payroll period is already finalized.');
           for(const r of payrollRecords){
+            await client.query('INSERT INTO finalized_payroll_ledger(payroll_period_id,employee_id,payroll_record) VALUES($1,$2,$3::jsonb) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',[p.id,r.employeeId,JSON.stringify(r)]);
             await client.query('INSERT INTO payroll_rate_snapshots(id,payroll_period_id,employee_id,daily_rate) VALUES($1,$2,$3,$4) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',['rate_'+p.id+'_'+r.employeeId,p.id,r.employeeId,r.dailyRate]);
             await client.query('DELETE FROM payroll_deduction_snapshots WHERE payroll_period_id=$1 AND employee_id=$2',[p.id,r.employeeId]);
             await client.query('INSERT INTO payroll_deduction_snapshot_headers(payroll_period_id,employee_id) VALUES($1,$2) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',[p.id,r.employeeId]);

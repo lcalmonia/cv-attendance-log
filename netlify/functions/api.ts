@@ -540,12 +540,16 @@ async function handle(request: Request) {
     }
     if(path==='admin/periods'&&m==='POST'&&isAdmin(u)){
       const b=await request.json(); if(!dateOk(b.startDate)||!dateOk(b.endDate)||!dateOk(b.payoutDate)||b.endDate<b.startDate)return json({error:'Valid start date, end date, and payout date are required.'},400);
-      const id=`period_${randomBytes(8).toString('hex')}`; await db.sql`INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES(${id},${b.name||`${b.startDate} to ${b.endDate}`},${b.startDate},${b.endDate},${b.payoutDate},${b.status||'open'})`;
+      const status=b.status||'open';
+      if(status==='finalized')return json({error:'A payroll period must be finalized through the payroll finalization process.'},400);
+      const id=`period_${randomBytes(8).toString('hex')}`; await db.sql`INSERT INTO payroll_periods(id,name,start_date,end_date,payout_date,status) VALUES(${id},${b.name||`${b.startDate} to ${b.endDate}`},${b.startDate},${b.endDate},${b.payoutDate},${status})`;
       return json({id,name:b.name||`${b.startDate} to ${b.endDate}`,startDate:b.startDate,endDate:b.endDate,payoutDate:b.payoutDate,status:b.status||'open'});
     }
     if(path.startsWith('admin/periods/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2], p=await periodById(id); if(!p)return json({error:'Payroll period not found.'},404); const b=await request.json();
       const n={name:b.name??p.name,startDate:b.startDate??dateOnly(p.start_date),endDate:b.endDate??dateOnly(p.end_date),payoutDate:b.payoutDate??dateOnly(p.payout_date),status:b.status??p.status};
+      if(p.status==='finalized')return json({error:'Finalized payroll periods cannot be edited.'},400);
+      if(n.status==='finalized')return json({error:'A payroll period must be finalized through the payroll finalization process.'},400);
       if(!dateOk(n.startDate)||!dateOk(n.endDate)||n.endDate<n.startDate)return json({error:'Invalid period dates.'},400);
       await db.sql`UPDATE payroll_periods SET name=${n.name},start_date=${n.startDate},end_date=${n.endDate},payout_date=${n.payoutDate},status=${n.status} WHERE id=${id}`;
       return json({id,...n});
@@ -716,6 +720,11 @@ async function handle(request: Request) {
       const ti=iso(b.timeIn), bo=iso(b.breakOut), bi=iso(b.breakIn), to=iso(b.timeOut);
       if([b.timeIn,b.breakOut,b.breakIn,b.timeOut].some((v:any)=>v && Number.isNaN(new Date(v).getTime())))return json({error:'One or more attendance times are invalid.'},400);
       const schedule=await resolveScheduleForAttendance(e.id,b.date,b.payrollPeriodId||null);
+      const attendancePeriodId=schedule?.payroll_period_id||b.payrollPeriodId||null;
+      if(attendancePeriodId){
+        const p=await periodById(attendancePeriodId);
+        if(p?.status==='finalized')return json({error:'Attendance cannot be changed after the payroll period is finalized.'},400);
+      }
       const draft={time_in:ti,break_out:bo,break_in:bi,time_out:to};
       const metrics=attendanceVariance(draft,schedule);
       const late=metrics.lateMinutes;
@@ -746,13 +755,21 @@ async function handle(request: Request) {
     }
     if(path.startsWith('admin/attendance/')&&m==='DELETE'&&isAdmin(u)){
       const id=path.split('/')[2];
-      const a=(await db.sql`SELECT id FROM attendance WHERE id=${id}`).rows[0];
+      const a=(await db.sql`SELECT id,payroll_period_id FROM attendance WHERE id=${id}`).rows[0];
       if(!a)return json({error:'Attendance record not found.'},404);
+      if(a.payroll_period_id){
+        const p=await periodById(a.payroll_period_id);
+        if(p?.status==='finalized')return json({error:'Attendance cannot be changed after the payroll period is finalized.'},400);
+      }
       await db.sql`DELETE FROM attendance WHERE id=${id}`;
       return json({success:true});
     }
     if(path.startsWith('admin/attendance/')&&m==='PUT'&&isAdmin(u)){
       const id=path.split('/')[2], a=(await db.sql`SELECT * FROM attendance WHERE id=${id}`).rows[0]; if(!a)return json({error:'Attendance record not found.'},404);
+      if(a.payroll_period_id){
+        const p=await periodById(a.payroll_period_id);
+        if(p?.status==='finalized')return json({error:'Attendance cannot be changed after the payroll period is finalized.'},400);
+      }
       const b=await request.json(), iso=(v:any)=>v?new Date(v).toISOString():null;
       const n={timeIn:b.timeIn!==undefined?iso(b.timeIn):a.time_in,breakOut:b.breakOut!==undefined?iso(b.breakOut):a.break_out,breakIn:b.breakIn!==undefined?iso(b.breakIn):a.break_in,timeOut:b.timeOut!==undefined?iso(b.timeOut):a.time_out};
       const schedule=await resolveScheduleForAttendance(a.employee_id,a.date,a.payroll_period_id||b.payrollPeriodId||null);
@@ -779,7 +796,20 @@ async function handle(request: Request) {
     if(path==='admin/incentives'&&m==='POST'&&isAdmin(u)){const b=await request.json();if(!b.businessId||!b.name||b.amount===undefined)return json({error:'Business, name, and amount are required.'},400);const id=`inc_${randomBytes(8).toString('hex')}`,type=b.incentiveType||'attendance';if(!['attendance','other'].includes(type))return json({error:'Invalid incentive type.'},400);await db.sql`INSERT INTO incentive_programs(id,business_id,name,description,amount,incentive_type,require_no_late,require_no_absence,require_no_undertime,status,effective_date) VALUES(${id},${b.businessId},${b.name},${b.description||''},${Number(b.amount)},${type},${b.requireNoLate!==false},${b.requireNoAbsence!==false},${b.requireNoUndertime===true},${b.status||'active'},${b.effectiveDate||phNow().date})`;return json({id,businessId:b.businessId,name:b.name,description:b.description||'',amount:Number(b.amount),incentiveType:type,requireNoLate:b.requireNoLate!==false,requireNoAbsence:b.requireNoAbsence!==false,requireNoUndertime:b.requireNoUndertime===true,status:b.status||'active',effectiveDate:b.effectiveDate||phNow().date});}
     if(path.startsWith('admin/incentives/')&&m==='PUT'&&isAdmin(u)){const id=path.split('/')[2],i=(await db.sql`SELECT * FROM incentive_programs WHERE id=${id}`).rows[0];if(!i)return json({error:'Incentive not found.'},404);const b=await request.json(),n={name:b.name??i.name,description:b.description??i.description,amount:b.amount!==undefined?Number(b.amount):Number(i.amount),incentiveType:b.incentiveType??i.incentive_type,requireNoLate:b.requireNoLate!==undefined?Boolean(b.requireNoLate):i.require_no_late,requireNoAbsence:b.requireNoAbsence!==undefined?Boolean(b.requireNoAbsence):i.require_no_absence,requireNoUndertime:b.requireNoUndertime!==undefined?Boolean(b.requireNoUndertime):Boolean(i.require_no_undertime),status:b.status??i.status,effectiveDate:b.effectiveDate??String(i.effective_date).slice(0,10)};if(!['attendance','other'].includes(n.incentiveType))return json({error:'Invalid incentive type.'},400);await db.sql`UPDATE incentive_programs SET name=${n.name},description=${n.description},amount=${n.amount},incentive_type=${n.incentiveType},require_no_late=${n.requireNoLate},require_no_absence=${n.requireNoAbsence},require_no_undertime=${n.requireNoUndertime},status=${n.status},effective_date=${n.effectiveDate} WHERE id=${id}`;return json({id,businessId:i.business_id,...n});}
     if(path.startsWith('admin/incentives/')&&m==='DELETE'&&isAdmin(u)){await db.sql`DELETE FROM incentive_programs WHERE id=${path.split('/')[2]}`;return json({success:true});}
-    if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){const id=path.split('/')[2],p=await periodById(id);if(!p)return json({error:'Payroll period not found.'},404);const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;const records=[];for(const e of es)records.push(await calculatePayroll(e.id,id));return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},records});}
+    if(path.startsWith('admin/payroll/')&&m==='GET'&&isAdmin(u)){
+      const id=path.split('/')[2],p=await periodById(id);
+      if(!p)return json({error:'Payroll period not found.'},404);
+      let records:any[]=[];
+      if(p.status==='finalized'){
+        const frozen=(await db.sql`SELECT payroll_record AS "payrollRecord" FROM finalized_payroll_ledger WHERE payroll_period_id=${id} ORDER BY employee_id`).rows;
+        if(frozen.length)records=frozen.map((row:any)=>typeof row.payrollRecord==='string'?JSON.parse(row.payrollRecord):row.payrollRecord);
+      }
+      if(!records.length){
+        const es=(await db.sql`SELECT id FROM employees WHERE status='active' ORDER BY full_name`).rows;
+        for(const e of es)records.push(await calculatePayroll(e.id,id));
+      }
+      return json({period:{id:p.id,name:p.name,startDate:dateOnly(p.start_date),endDate:dateOnly(p.end_date),payoutDate:dateOnly(p.payout_date),status:p.status},records});
+    }
     if(path==='admin/payroll/status'&&m==='POST'&&isAdmin(u)){
       const b=await request.json();
       if(!['open','for_approval','approved','finalized'].includes(b.status))return json({error:'Invalid payroll status.'},400);

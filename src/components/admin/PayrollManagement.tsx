@@ -185,7 +185,7 @@ export const PayrollManagement: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <span className="text-xs text-slate-400 uppercase font-semibold">Total Net Payout</span>
-          <div className="text-2xl font-bold text-emerald-400 mt-1">₱{totalNet.toLocaleString()}</div>
+          <div className={`text-2xl font-bold mt-1 ${totalNet < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{totalNet < 0 ? '-₱' : '₱'}{Math.abs(totalNet).toLocaleString()}</div>
           <span className="text-[11px] text-slate-500">Total payable to personnel</span>
         </div>
       </div>

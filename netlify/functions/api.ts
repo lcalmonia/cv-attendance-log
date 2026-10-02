@@ -709,13 +709,13 @@ async function handle(request: Request) {
       return json({businessId:biz,nightDifferentialHourlyRate:Number(s?.nightDifferentialHourlyRate||0),nightDifferentialMultiplier:Number(s?.nightDifferentialMultiplier??1),regularOvertimeMultiplier:Number(s?.regularOvertimeMultiplier??1),holidays:h.map((x:any)=>({...x,holidayDate:String(x.holidayDate).slice(0,10),overtimeRate:Number(x.overtimeRate)}))});
     }
     if(path==='admin/settings'&&m==='PUT'&&isAdmin(u)){
-      const b=await request.json(), biz=String(b.businessId||'all'), rate=Number(b.nightDifferentialHourlyRate||0);
-      if(rate<0)return json({error:'Night differential hourly rate cannot be negative.'},400);
-      if(biz!=='all' && !(await db.sql`SELECT 1 FROM businesses WHERE id=${biz}`).rows[0])return json({error:'Business not found.'},404);
-      await db.sql`INSERT INTO payroll_settings(business_id,night_differential_hourly_rate) VALUES(${biz},${rate}) ON CONFLICT(business_id) DO UPDATE SET night_differential_hourly_rate=EXCLUDED.night_differential_hourly_rate,updated_at=NOW()`;
-      return json({success:true,businessId:biz,nightDifferentialHourlyRate:rate});
-    }
-    if(path==='admin/holidays'&&m==='POST'&&isAdmin(u)){
+       const b=await request.json(), biz=String(b.businessId||'all'), rate=Number(b.nightDifferentialHourlyRate), ndMultiplier=Number(b.nightDifferentialMultiplier), regularOtMultiplier=Number(b.regularOvertimeMultiplier);
+       if(!Number.isFinite(rate)||rate<0||!Number.isFinite(ndMultiplier)||ndMultiplier<0||!Number.isFinite(regularOtMultiplier)||regularOtMultiplier<0)return json({error:'Payroll rates and multipliers must be valid non-negative numbers.'},400);
+       if(biz!=='all' && !(await db.sql`SELECT 1 FROM businesses WHERE id=${biz}`).rows[0])return json({error:'Business not found.'},404);
+       await db.sql`INSERT INTO payroll_settings(business_id,night_differential_hourly_rate,night_differential_multiplier,regular_overtime_multiplier) VALUES(${biz},${rate},${ndMultiplier},${regularOtMultiplier}) ON CONFLICT(business_id) DO UPDATE SET night_differential_hourly_rate=EXCLUDED.night_differential_hourly_rate,night_differential_multiplier=EXCLUDED.night_differential_multiplier,regular_overtime_multiplier=EXCLUDED.regular_overtime_multiplier,updated_at=NOW()`;
+       return json({success:true,businessId:biz,nightDifferentialHourlyRate:rate,nightDifferentialMultiplier:ndMultiplier,regularOvertimeMultiplier:regularOtMultiplier});
+     }
+     if(path==='admin/holidays'&&m==='POST'&&isAdmin(u)){
       const b=await request.json();
       if(!dateOk(b.holidayDate)||!b.name||!holidayTypeOk(b.holidayType)||Number(b.overtimeRate)<0)return json({error:'Holiday date, name, type, and a valid overtime rate are required.'},400);
       const id=`hol_${randomBytes(8).toString('hex')}`;

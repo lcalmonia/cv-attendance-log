@@ -20,19 +20,7 @@ export const AttendanceManagement: React.FC = () => {
   const timeMinutes=(time:string)=>{const [h,m]=time.split(':').map(Number);return h*60+m;};
   const minutesBetween=(start?:string,end?:string)=>{if(!start||!end)return 0;return Math.max(0,(timeMinutes(end)-timeMinutes(start)+1440)%1440);};
   const scheduleDateTime=(date:string,time?:string,overnightFrom?:string)=>{if(!date||!time)return null;const base=new Date(date+'T'+time+':00+08:00');if(Number.isNaN(base.getTime()))return null;if(overnightFrom&&timeMinutes(time)<timeMinutes(overnightFrom))base.setUTCDate(base.getUTCDate()+1);return base;};
-  const elapsedFromDutyStart=(start?:string,end?:string,dutyStart?:string)=>{
-    if(!start||!end)return 0;
-    const anchor=dutyStart||start;
-    const startMinutes=timeMinutes(start),endMinutes=timeMinutes(end),anchorMinutes=timeMinutes(anchor);
-    const absoluteStart=startMinutes<anchorMinutes?startMinutes+1440:startMinutes;
-    const absoluteEnd=endMinutes<anchorMinutes?endMinutes+1440:endMinutes;
-    return Math.max(0,absoluteEnd-absoluteStart);
-  };
-  const timeAfterDutyStart=(time?:string,dutyStart?:string)=>{
-    if(!time||!dutyStart)return null;
-    const value=timeMinutes(time),anchor=timeMinutes(dutyStart);
-    return value<anchor?value+1440:value;
-  };
+  const actualDateTimes=buildAttendanceTimes(form.date||'',form);
   const buildAttendanceTimes=(dutyDate:string,values:{timeIn?:string;breakOut?:string;breakIn?:string;timeOut?:string})=>{
     const result:{timeIn:string|null;breakOut:string|null;breakIn:string|null;timeOut:string|null}={timeIn:null,breakOut:null,breakIn:null,timeOut:null};
     let currentDate=dutyDate;
@@ -50,10 +38,10 @@ export const AttendanceManagement: React.FC = () => {
   useEffect(()=>{if(!modal||!selectedPeriodId||!form.employeeId||!form.date){setSchedule(null);return;}api.admin.getSchedules(selectedPeriodId,form.employeeId).then(list=>setSchedule(list.find(s=>s.date===form.date)||null)).catch(()=>setSchedule(null));},[modal,selectedPeriodId,form.employeeId,form.date]);
   const preview=(()=>{
     if(!schedule)return null;
-    const actualInMinutes=form.timeIn?timeMinutes(form.timeIn):null;
-    const actualOutMinutes=form.timeOut?timeMinutes(form.timeOut):null;
-    const requiredInMinutes=schedule.requiredTimeIn?timeMinutes(schedule.requiredTimeIn):null;
-    const requiredOutMinutes=schedule.requiredTimeOut?timeMinutes(schedule.requiredTimeOut):null;
+    const requiredIn=schedule.requiredTimeIn?scheduleDateTime(form.date,schedule.requiredTimeIn):null;
+    const requiredOut=schedule.requiredTimeOut?scheduleDateTime(form.date,schedule.requiredTimeOut,schedule.requiredTimeIn):null;
+    const actualIn=actualDateTimes.timeIn?new Date(actualDateTimes.timeIn):null;
+    const actualOut=actualDateTimes.timeOut?new Date(actualDateTimes.timeOut):null;
     const requiredBreak=minutesBetween(schedule.breakOut,schedule.breakIn);
     const actualBreak=form.breakOut&&form.breakIn?minutesBetween(form.breakOut,form.breakIn):0;
 
@@ -61,21 +49,23 @@ export const AttendanceManagement: React.FC = () => {
     // break or takes a shorter break, the full required break is still deducted.
     // If the employee takes a longer break, deduct the actual longer break.
     const effectiveBreak=Math.max(requiredBreak,actualBreak);
-    const late=actualInMinutes!==null&&requiredInMinutes!==null
-      ?Math.max(0,actualInMinutes-requiredInMinutes)
-      :0;
-    const work=actualInMinutes!==null&&actualOutMinutes!==null
-      ?Math.max(0,elapsedFromDutyStart(form.timeIn,form.timeOut,schedule.requiredTimeIn)-effectiveBreak)
+    const late=actualIn&&requiredIn
+      ?Math.max(0,Math.round((actualIn.getTime()-requiredIn.getTime())/60000))
       :0;
 
-    const scheduledOutAbsolute=requiredOutMinutes!==null&&requiredInMinutes!==null
-      ?timeAfterDutyStart(schedule.requiredTimeOut,schedule.requiredTimeIn)
-      :null;
-    const actualOutAbsolute=actualOutMinutes!==null&&requiredInMinutes!==null
-      ?timeAfterDutyStart(form.timeOut,schedule.requiredTimeIn)
-      :null;
-    const outDiff=scheduledOutAbsolute!==null&&actualOutAbsolute!==null
-      ?Math.max(0,actualOutAbsolute-scheduledOutAbsolute)
+    // Early arrival does not add work time. Work starts at the scheduled
+    // Time In when the employee arrived early; otherwise it starts at actual
+    // Time In. This mirrors the backend calculation exactly.
+    const effectiveStart=actualIn&&requiredIn
+      ?(actualIn<requiredIn?requiredIn:actualIn)
+      :actualIn;
+    const elapsed=effectiveStart&&actualOut
+      ?Math.max(0,Math.round((actualOut.getTime()-effectiveStart.getTime())/60000))
+      :0;
+    const work=Math.max(0,elapsed-effectiveBreak);
+
+    const outDiff=requiredOut&&actualOut
+      ?Math.max(0,Math.round((actualOut.getTime()-requiredOut.getTime())/60000))
       :0;
     const overtime=outDiff>30?outDiff:0;
 

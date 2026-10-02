@@ -343,7 +343,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*ndMultiplier*100)/100;
-  const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
+  const gross=Math.round((baseDutyPay+regularOvertimePay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
   const deductionSnapshotHeader=p.status==='finalized'
     ? (await db.sql`SELECT 1 FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
     : null;

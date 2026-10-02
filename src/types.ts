@@ -86,6 +86,7 @@ export interface AttendanceRecord {
   undertimeMinutes?: number;
   overbreakMinutes?: number;
   varianceMinutes?: number;
+  overtimeMinutes?: number;
   status: AttendanceStatus;
 }
 
@@ -152,10 +153,12 @@ export interface PayrollRecord {
   nightDifferentialHourlyRate?: number;
   nightDifferentialPay?: number;
   holidayOvertimePay?: number;
+  overtimeMinutesTotal?: number;
+  overtimeHours?: number;
   breakdown: {
     incentives: Array<{ name: string; amount: number }>;
     deductions: Array<{ name: string; amount: number; type: 'employee' | 'recurring' }>;
-    attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; hours: number }>;
+    attendanceDays: Array<{ date: string; status: AttendanceStatus; lateMinutes: number; overtimeMinutes?: number; hours: number }>;
   };
 }
 

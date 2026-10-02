@@ -580,11 +580,14 @@ async function handle(request: Request) {
       const existing=(await db.sql`SELECT id FROM schedules WHERE employee_id=${e.id} AND payroll_period_id=${p.id} AND date=${date}`).rows[0], id=existing?.id||b.id||`sched_${randomBytes(8).toString('hex')}`;
       if(existing) await db.sql`UPDATE schedules SET required_time_in=${working?b.requiredTimeIn:null},required_time_out=${working?b.requiredTimeOut:null},break_out=${working?(b.breakOut||null):null},break_in=${working?(b.breakIn||null):null},is_working_day=${working},notes=${b.notes||''} WHERE id=${id}`;
       else await db.sql`INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES(${id},${e.id},${p.id},${date},${working?b.requiredTimeIn:null},${working?b.requiredTimeOut:null},${working?(b.breakOut||null):null},${working?(b.breakIn||null):null},${working},${b.notes||''})`;
+      // Any schedule change can change the amount of overtime, so previously
+      // approved overtime for this duty date must be reviewed again.
+      await db.sql`UPDATE attendance SET overtime_approval_status=CASE WHEN time_out IS NOT NULL AND ${working} THEN 'pending' ELSE 'not_required' END,overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE employee_id=${e.id} AND date=${date} AND payroll_period_id=${p.id}`;
       const s=(await db.sql`SELECT * FROM schedules WHERE id=${id}`).rows[0];
       return json({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes});
     }
     if(path.startsWith('admin/schedules/')&&m==='DELETE'&&isAdmin(u)){
-      const id=path.split('/')[2], s=(await db.sql`SELECT payroll_period_id FROM schedules WHERE id=${id}`).rows[0]; if(s){const p=await periodById(s.payroll_period_id); if(p?.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400); await db.sql`DELETE FROM schedules WHERE id=${id}`;} return json({success:true});
+      const id=path.split('/')[2], s=(await db.sql`SELECT employee_id,payroll_period_id,date FROM schedules WHERE id=${id}`).rows[0]; if(s){const p=await periodById(s.payroll_period_id); if(p?.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400); await db.sql`DELETE FROM schedules WHERE id=${id}`; await db.sql`UPDATE attendance SET overtime_approval_status='not_required',overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE employee_id=${s.employee_id} AND date=${s.date} AND payroll_period_id=${s.payroll_period_id}`;} return json({success:true});
     }
     if(path==='admin/attendance'&&m==='GET'&&isAdmin(u)){
       const q=new URL(request.url).searchParams;

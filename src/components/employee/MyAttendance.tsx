@@ -145,6 +145,7 @@ export const MyAttendance: React.FC = () => {
                 <th className="py-3 px-4">Time Out</th>
                 <th className="py-3 px-4">Late/Undertime/Overbreak</th>
                 <th className="py-3 px-4">Overtime</th>
+                <th className="py-3 px-4">OT Approval</th>
                 <th className="py-3 px-4">Total Hours</th>
                 <th className="py-3 px-4">Status</th>
               </tr>
@@ -152,7 +153,7 @@ export const MyAttendance: React.FC = () => {
             <tbody className="divide-y divide-slate-800/80">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-500">
+                  <td colSpan={10} className="py-8 text-center text-slate-500">
                     Loading your attendance history…
                   </td>
                 </tr>
@@ -187,6 +188,15 @@ export const MyAttendance: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-cyan-400">
                       {(att.overtimeMinutes || 0) > 0 ? `${att.overtimeMinutes} min` : '—'}
+                    </td>
+                    <td className="py-3 px-4 text-xs font-semibold">
+                      {(att.overtimeMinutes || 0) <= 0
+                        ? <span className="text-slate-500">Not required</span>
+                        : att.overtimeApprovalStatus === 'approved'
+                          ? <span className="text-emerald-400">Approved</span>
+                          : att.overtimeApprovalStatus === 'rejected'
+                            ? <span className="text-red-400">Rejected</span>
+                            : <span className="text-amber-400">Pending Super Admin</span>}
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-200">
                       {att.totalWorkMinutes > 0

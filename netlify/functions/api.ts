@@ -321,7 +321,10 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*ndRate*100)/100;
   const gross=Math.round((baseDutyPay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
-  const deductionSnapshot=p.status==='finalized'
+  const deductionSnapshotHeader=p.status==='finalized'
+    ? (await db.sql`SELECT 1 FROM payroll_deduction_snapshot_headers WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
+    : null;
+  const deductionSnapshot=deductionSnapshotHeader
     ? (await db.sql`SELECT deduction_name AS "deductionName",amount,deduction_type AS "deductionType" FROM payroll_deduction_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId} ORDER BY line_no`).rows
     : [];
   const deductions:any[]=[]; let empD=0, recD=0;
@@ -788,6 +791,7 @@ async function handle(request: Request) {
           for(const r of payrollRecords){
             await client.query('INSERT INTO payroll_rate_snapshots(id,payroll_period_id,employee_id,daily_rate) VALUES($1,$2,$3,$4) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',['rate_'+p.id+'_'+r.employeeId,p.id,r.employeeId,r.dailyRate]);
             await client.query('DELETE FROM payroll_deduction_snapshots WHERE payroll_period_id=$1 AND employee_id=$2',[p.id,r.employeeId]);
+            await client.query('INSERT INTO payroll_deduction_snapshot_headers(payroll_period_id,employee_id) VALUES($1,$2) ON CONFLICT(payroll_period_id,employee_id) DO NOTHING',[p.id,r.employeeId]);
             for(let i=0;i<r.breakdown.deductions.length;i++){
               const d=r.breakdown.deductions[i];
               await client.query('INSERT INTO payroll_deduction_snapshots(id,payroll_period_id,employee_id,line_no,deduction_name,deduction_type,amount) VALUES($1,$2,$3,$4,$5,$6,$7)',['pds_'+p.id+'_'+r.employeeId+'_'+i,p.id,r.employeeId,i,d.name,d.type,Number(d.amount)]);

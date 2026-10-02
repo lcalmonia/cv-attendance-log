@@ -16,7 +16,7 @@ SET overtime_approval_status = 'pending',
     overtime_reviewed_at = NULL
 FROM schedules s
 WHERE s.employee_id = a.employee_id
-  AND s.payroll_period_id = a.payroll_period_id
+  AND (s.payroll_period_id = a.payroll_period_id OR a.payroll_period_id IS NULL)
   AND s.date = a.date
   AND s.is_working_day = TRUE
   AND a.time_out IS NOT NULL

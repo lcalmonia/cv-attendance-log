@@ -143,7 +143,9 @@ export const MyAttendance: React.FC = () => {
                 <th className="py-3 px-4">Time In</th>
                 <th className="py-3 px-4">Break Window</th>
                 <th className="py-3 px-4">Time Out</th>
-                <th className="py-3 px-4">Late/Undertime/Overbreak</th>
+                <th className="py-3 px-4">Late</th>
+                <th className="py-3 px-4">Overbreak</th>
+                <th className="py-3 px-4">Undertime</th>
                 <th className="py-3 px-4">Overtime</th>
                 <th className="py-3 px-4">OT Approval</th>
                 <th className="py-3 px-4">Total Hours</th>
@@ -179,11 +181,25 @@ export const MyAttendance: React.FC = () => {
                     <td className="py-3 px-4 text-xs font-mono font-medium text-white">
                       {formatTime(att.timeOut)}
                     </td>
-                    <td className="py-3 px-4 text-xs" title={'Late: '+(att.lateMinutes||0)+' min • Undertime: '+(att.undertimeMinutes||0)+' min • Overbreak: '+(att.overbreakMinutes||0)+' min'}>
-                      {(att.varianceMinutes || 0) > 0 ? (
-                        <span className="font-semibold text-amber-400">+{att.varianceMinutes} mins</span>
+                    <td className="py-3 px-4 text-xs">
+                      {(att.lateMinutes || 0) > 0 ? (
+                        <span className="font-semibold text-amber-400">{att.lateMinutes} min</span>
                       ) : (
-                        <span className="text-slate-500">0 min</span>
+                        <span className="text-slate-500">0</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-xs">
+                      {(att.overbreakMinutes || 0) > 0 ? (
+                        <span className="font-semibold text-orange-400">{att.overbreakMinutes} min</span>
+                      ) : (
+                        <span className="text-slate-500">0</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-xs">
+                      {(att.undertimeMinutes || 0) > 0 ? (
+                        <span className="font-semibold text-rose-400">{att.undertimeMinutes} min</span>
+                      ) : (
+                        <span className="text-slate-500">0</span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-cyan-400">

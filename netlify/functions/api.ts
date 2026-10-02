@@ -799,7 +799,9 @@ async function handle(request: Request) {
         if(a.break_out&&!a.break_in)return json({error:'Please complete your break before timing out.'},400);
         const work=normalizedWorkMinutes({...a,time_out:ph.iso},s);
         const finalMetrics=attendanceVariance({...a,time_out:ph.iso},s);
-        await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${finalMetrics.lateMinutes>0?'late':'present'},updated_at=NOW() WHERE id=${a.id}`;
+        const clockOvertime=overtimeMinutes({...a,time_out:ph.iso},s);
+        const approvalStatus=clockOvertime>0?'pending':'not_required';
+        await db.sql`UPDATE attendance SET time_out=${ph.iso},total_work_minutes=${work},status=${finalMetrics.lateMinutes>0?'late':'present'},overtime_approval_status=${approvalStatus},overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE id=${a.id}`;
       }
       a=(await db.sql`SELECT * FROM attendance WHERE id=${a.id}`).rows[0];
       const responseMetrics=attendanceVariance(a,s);

@@ -127,7 +127,7 @@ export const DeductionManagement: React.FC = () => {
       employee: a.employeeName,
       deductionName: a.deductionName,
       amount: Number(a.amount),
-      effectiveCutoff: a.recurring ? 'All Periods' : periodA?.name || 'Current',
+      effectiveCutoff: a.recurring ? Number.NEGATIVE_INFINITY : periodA?.startDate ? new Date(periodA.startDate).getTime() : Number.POSITIVE_INFINITY,
       recurrence: a.recurring ? 'Recurring' : 'One-Time',
       status: a.status,
     };
@@ -135,7 +135,7 @@ export const DeductionManagement: React.FC = () => {
       employee: b.employeeName,
       deductionName: b.deductionName,
       amount: Number(b.amount),
-      effectiveCutoff: b.recurring ? 'All Periods' : periodB?.name || 'Current',
+      effectiveCutoff: b.recurring ? Number.NEGATIVE_INFINITY : periodB?.startDate ? new Date(periodB.startDate).getTime() : Number.POSITIVE_INFINITY,
       recurrence: b.recurring ? 'Recurring' : 'One-Time',
       status: b.status,
     };

@@ -285,6 +285,19 @@ export const MyPayroll: React.FC = () => {
               </span>
             </div>
 
+            {(payroll.overtimeHours || 0) > 0 || (payroll.pendingOvertimeMinutesTotal || 0) > 0 ? (
+              <div className="flex justify-between items-center py-1 text-cyan-400">
+                <div>
+                  <span className="font-medium">Overtime</span>
+                  <span className="text-xs text-cyan-500/80 block">
+                    {(payroll.overtimeHours || 0).toFixed(2)} approved hours
+                    {(payroll.pendingOvertimeMinutesTotal || 0) > 0 ? ` • ${payroll.pendingOvertimeMinutesTotal} min pending Super Admin approval` : ''}
+                  </span>
+                </div>
+                <span className="font-mono font-semibold">{(payroll.overtimeHours || 0).toFixed(2)} hrs</span>
+              </div>
+            ) : null}
+
             {payroll.holidayOvertimePay ? (
               <div className="flex justify-between items-center py-1 text-cyan-400">
                 <div>

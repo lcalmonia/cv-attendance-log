@@ -144,12 +144,17 @@ export const api = {
       if (params.periodId) q.set('periodId', params.periodId);
       if (params.businessId) q.set('businessId', params.businessId);
       if (params.date) q.set('date', params.date);
-      return request<(AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string; undertimeMinutes: number; overbreakMinutes: number; varianceMinutes: number; overtimeMinutes: number })[]>(
+      return request<(AttendanceRecord & { employeeName: string; employeeIdCode: string; businessName: string; undertimeMinutes: number; overbreakMinutes: number; varianceMinutes: number; overtimeMinutes: number; overtimeApprovalStatus: import('../types').OvertimeApprovalStatus })[]>(
         `/api/admin/attendance?${q.toString()}`
       );
     },
     deleteAttendance: (id: string) =>
       request<{ success: boolean }>(`/api/admin/attendance/${id}`, { method: 'DELETE' }),
+    setOvertimeApproval: (id: string, status: 'approved' | 'rejected') =>
+      request<{ success: boolean; status: 'approved' | 'rejected'; reviewedAt: string }>(`/api/admin/attendance/${id}/overtime-approval`, {
+        method: 'POST',
+        body: JSON.stringify({ status }),
+      }),
 
     // Deductions
     getDeductionTypes: () => request<DeductionType[]>('/api/admin/deductions/types'),

@@ -6,24 +6,26 @@ import { api } from '../../services/api';
 export const PayrollSettingsManagement: React.FC = () => {
   const [businesses,setBusinesses]=useState<Business[]>([]);
   const [businessId,setBusinessId]=useState('all');
-  const [settings,setSettings]=useState<PayrollSettings>({businessId:'all',nightDifferentialHourlyRate:0,holidays:[]});
+  const [settings,setSettings]=useState<PayrollSettings>({businessId:'all',nightDifferentialHourlyRate:0,nightDifferentialMultiplier:1,regularOvertimeMultiplier:1,holidays:[]});
   const [rate,setRate]=useState('0');
+  const [nightMultiplier,setNightMultiplier]=useState('1.00');
+  const [regularOtMultiplier,setRegularOtMultiplier]=useState('1.00');
   const [holiday,setHoliday]=useState({holidayDate:'',name:'',holidayType:'regular',overtimeRate:'1.00',businessId:'all'});
   const [loading,setLoading]=useState(true);
 
-  const loadSettings=async()=>{setLoading(true);try{const s=await api.admin.getSettings(businessId);setSettings(s);setRate(String(s.nightDifferentialHourlyRate));}finally{setLoading(false);}};
+  const loadSettings=async()=>{setLoading(true);try{const s=await api.admin.getSettings(businessId);setSettings(s);setRate(String(s.nightDifferentialHourlyRate));setNightMultiplier(String(s.nightDifferentialMultiplier));setRegularOtMultiplier(String(s.regularOvertimeMultiplier));}finally{setLoading(false);}};
   useEffect(()=>{api.admin.getBusinesses().then(setBusinesses).catch(console.error);},[]);
   useEffect(()=>{loadSettings();},[businessId]);
 
-  const save=async()=>{await api.admin.updateSettings({businessId,nightDifferentialHourlyRate:Number(rate)});await loadSettings();alert('Payroll settings saved.');};
+  const save=async()=>{const ndRate=Number(rate),ndMultiplier=Number(nightMultiplier),otMultiplier=Number(regularOtMultiplier);if(!Number.isFinite(ndRate)||ndRate<0||!Number.isFinite(ndMultiplier)||ndMultiplier<0||!Number.isFinite(otMultiplier)||otMultiplier<0){alert('Payroll rates and multipliers must be valid non-negative numbers.');return;}await api.admin.updateSettings({businessId,nightDifferentialHourlyRate:ndRate,nightDifferentialMultiplier:ndMultiplier,regularOvertimeMultiplier:otMultiplier});await loadSettings();alert('Payroll settings saved.');};
   const addHoliday=async(e:React.FormEvent)=>{e.preventDefault();await api.admin.createHoliday({...holiday,businessId});setHoliday({holidayDate:'',name:'',holidayType:'regular',overtimeRate:'1.00',businessId});await loadSettings();};
   const remove=async(id:string)=>{if(!confirm('Delete this holiday?'))return;await api.admin.deleteHoliday(id);await loadSettings();};
 
   return <div className="space-y-6">
-    <div><h1 className="text-2xl font-bold text-white">Payroll Settings</h1><p className="text-sm text-slate-400 mt-1">Configure night differential and holiday overtime rules.</p></div>
+    <div><h1 className="text-2xl font-bold text-white">Payroll Settings</h1><p className="text-sm text-slate-400 mt-1">Configure regular overtime and night differential rates, plus holiday overtime rules.</p></div>
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5">
       <div><label className="block text-xs font-medium text-slate-400 mb-1">Business</label><select value={businessId} onChange={e=>setBusinessId(e.target.value)} className="w-full sm:max-w-md bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white"><option value="all">All Businesses</option>{businesses.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
-      <div className="flex flex-col sm:flex-row sm:items-end gap-3"><div className="flex-1 max-w-sm"><label className="block text-xs font-medium text-slate-400 mb-1">Night Differential Hourly Rate (₱)</label><input type="number" min="0" step="0.01" value={rate} onChange={e=>setRate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"/></div><button onClick={save} disabled={loading} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><Save className="w-4 h-4"/>Save Rate</button></div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"><div><label className="block text-xs font-medium text-slate-400 mb-1">Night Differential Hourly Rate (₱)</label><input type="number" min="0" step="0.01" value={rate} onChange={e=>setRate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"/></div><div><label className="block text-xs font-medium text-slate-400 mb-1">Night Differential Multiplier</label><input type="number" min="0" step="0.01" value={nightMultiplier} onChange={e=>setNightMultiplier(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"/><p className="text-[11px] text-slate-500 mt-1">ND hours × hourly rate × multiplier</p></div><div><label className="block text-xs font-medium text-slate-400 mb-1">Regular Overtime Multiplier</label><input type="number" min="0" step="0.01" value={regularOtMultiplier} onChange={e=>setRegularOtMultiplier(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"/><p className="text-[11px] text-slate-500 mt-1">OT hours × hourly rate × multiplier</p></div><button onClick={save} disabled={loading} className="sm:col-span-3 justify-self-start inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><Save className="w-4 h-4"/>Save Payroll Rates</button></div>
     </div>
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
       <h2 className="font-semibold text-white mb-4">Holiday Dates & Overtime Rates</h2>

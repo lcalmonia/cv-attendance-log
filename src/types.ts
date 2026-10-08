@@ -175,4 +175,4 @@ export interface PayrollRecord {
 
 
 export interface Holiday { id:string; businessId:string; holidayDate:string; name:string; holidayType:'regular'|'special_non_working'|'special_working'; overtimeRate:number; }
-export interface PayrollSettings { businessId:string; nightDifferentialHourlyRate:number; nightDifferentialMultiplier:number; regularOvertimeMultiplier:number; holidays:Holiday[]; }
+export interface PayrollSettings { businessId:string; nightDifferentialMultiplier:number; regularOvertimeMultiplier:number; holidays:Holiday[]; }

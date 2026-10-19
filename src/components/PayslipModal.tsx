@@ -100,7 +100,7 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-start">
                   <span className="min-w-0 break-words text-slate-300 print:text-gray-700">
                     {record.employmentStatus === 'part_time'
-                      ? `Hourly Duty Pay (${(record.hoursWorkedTotal || 0).toFixed(2)} hours, less break time)`
+                      ? `Hourly Duty Pay (${(record.basePayHoursTotal || 0).toFixed(2)} regular hours, after break deduction)`
                       : `Base Duty Pay (${record.daysWorked} days × ₱${record.dailyRate.toLocaleString()})`}
                   </span>
                   <span className="whitespace-nowrap font-mono font-medium text-white print:text-gray-900">

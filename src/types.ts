@@ -138,7 +138,9 @@ export interface PayrollRecord {
   employeeName: string;
   businessName: string;
   position: string;
+  employmentStatus?: EmploymentStatus;
   dailyRate: number;
+  hoursWorkedTotal?: number;
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;

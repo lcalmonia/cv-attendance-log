@@ -140,6 +140,7 @@ export interface PayrollRecord {
   position: string;
   employmentStatus?: EmploymentStatus;
   dailyRate: number;
+  hourlyRate?: number;
   hoursWorkedTotal?: number;
   scheduledDutyDays: number;
   daysWorked: number;

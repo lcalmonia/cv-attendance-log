@@ -18,6 +18,45 @@ const MyAttendance = lazy(() => import('./components/employee/MyAttendance').the
 const MyPayroll = lazy(() => import('./components/employee/MyPayroll').then((m) => ({ default: m.MyPayroll })));
 import { api } from './services/api';
 
+class ModuleErrorBoundary extends React.Component<
+  { children: React.ReactNode; moduleName: string },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error(`[CV Log] ${this.props.moduleName} module runtime error`, error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-xl border border-rose-900/60 bg-rose-950/30 p-6 text-sm text-slate-300">
+          <h2 className="text-base font-semibold text-rose-300">Unable to load {this.props.moduleName}</h2>
+          <p className="mt-2 text-slate-400">
+            The module encountered a browser runtime error. The rest of CV Log remains available.
+          </p>
+          <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-400 break-words">
+            {this.state.error.message || 'Unknown runtime error'}
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+          >
+            Reload module
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 export default function App() {
   const [authState, setAuthState] = useState<'checking' | 'login' | 'authenticated'>('checking');
   const [session, setSession] = useState<{
@@ -100,7 +139,11 @@ export default function App() {
             {activeTab === 'schedules' && <ScheduleManagement />}
             {activeTab === 'attendance' && <AttendanceManagement />}
             {activeTab === 'deductions' && <DeductionManagement />}
-            {activeTab === 'incentives' && <IncentiveManagement />}
+            {activeTab === 'incentives' && (
+  <ModuleErrorBoundary moduleName="Incentives">
+    <IncentiveManagement />
+  </ModuleErrorBoundary>
+)}
             {activeTab === 'payroll' && <PayrollManagement />}
             {activeTab === 'settings' && <PayrollSettingsManagement />}
           </>

@@ -496,30 +496,38 @@ export const ScheduleManagement: React.FC = () => {
                     <p className="text-[11px] text-slate-500">If a break is not required, employees may proceed to Time Out without recording it. Break In can only be required when Break Out is required.</p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Break Out Time
-                      </label>
-                      <input
-                        type="time"
-                        value={formData.breakOut}
-                        onChange={(e) => setFormData({ ...formData, breakOut: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
+                  {(formData.requireBreakOut || formData.requireBreakIn) && (
+                    <div className={`grid ${formData.requireBreakOut && formData.requireBreakIn ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+                      {formData.requireBreakOut && (
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">
+                            Break Out Time *
+                          </label>
+                          <input
+                            type="time"
+                            required
+                            value={formData.breakOut}
+                            onChange={(e) => setFormData({ ...formData, breakOut: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      )}
+                      {formData.requireBreakIn && (
+                        <div>
+                          <label className="block text-xs font-medium text-slate-300 mb-1">
+                            Break In Time *
+                          </label>
+                          <input
+                            type="time"
+                            required
+                            value={formData.breakIn}
+                            onChange={(e) => setFormData({ ...formData, breakIn: e.target.value })}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Break In Time
-                      </label>
-                      <input
-                        type="time"
-                        value={formData.breakIn}
-                        onChange={(e) => setFormData({ ...formData, breakIn: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
+                  )}
                 </>
               )}
 

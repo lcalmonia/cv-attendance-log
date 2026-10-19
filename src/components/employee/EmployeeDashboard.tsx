@@ -74,9 +74,9 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onNavigate
   const hasTimedOut = Boolean(attendance?.timeOut);
 
   const canTimeIn = !hasTimedIn;
-  const canBreakOut = hasTimedIn && !hasBrokenOut && !hasTimedOut;
-  const canBreakIn = hasTimedIn && hasBrokenOut && !hasBrokenIn && !hasTimedOut;
-  const canTimeOut = hasTimedIn && (!hasBrokenOut || hasBrokenIn) && !hasTimedOut;
+  const canBreakOut = hasTimedIn && !hasBrokenOut && !hasTimedOut && Boolean(schedule?.breakOut);
+  const canBreakIn = hasTimedIn && hasBrokenOut && !hasBrokenIn && !hasTimedOut && Boolean(schedule?.breakIn);
+  const canTimeOut = hasTimedIn && (!schedule?.requireBreakOut || hasBrokenOut) && (!schedule?.requireBreakIn || !hasBrokenOut || hasBrokenIn) && !hasTimedOut;
   const isCompleted = hasTimedIn && hasTimedOut;
 
   const formatTime = (isoString?: string) => {
@@ -163,13 +163,13 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onNavigate
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
                     <span className="text-slate-500 block">Scheduled Break Out:</span>
                     <span className="font-semibold text-slate-200 mt-0.5 block">
-                      {schedule.breakOut || 'Standard 1 hour'}
+                      {schedule.breakOut ? `${schedule.breakOut}${schedule.requireBreakOut ? ' (required)' : ' (optional)'}` : 'Not scheduled'}
                     </span>
                   </div>
                   <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
                     <span className="text-slate-500 block">Scheduled Break In:</span>
                     <span className="font-semibold text-slate-200 mt-0.5 block">
-                      {schedule.breakIn || 'Standard 1 hour'}
+                      {schedule.breakIn ? `${schedule.breakIn}${schedule.requireBreakIn ? ' (required)' : ' (optional)'}` : 'Not scheduled'}
                     </span>
                   </div>
                 </div>

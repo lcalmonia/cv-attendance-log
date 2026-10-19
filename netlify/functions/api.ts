@@ -875,19 +875,32 @@ async function handle(request: Request) {
       const e=await employeeById(u.employeeDbId); if(!e)return json({error:'Employee record not found.'},404);
       const b=await request.json(); if(!['time_in','break_out','break_in','time_out'].includes(b.action))return json({error:'Invalid clock action.'},400);
       const now=new Date(), ph=phNow(), today=ph.date;
+      const previousDateObject=new Date(`${today}T12:00:00+08:00`);
+      previousDateObject.setUTCDate(previousDateObject.getUTCDate()-1);
+      const previousDate=previousDateObject.toISOString().slice(0,10);
       let s:any=null, a:any=null;
       if(b.action==='time_in'){
         s=await resolveScheduleForAttendance(e.id,today);
         if(!s||!s.is_working_day)return json({error:'No working schedule is assigned for today.'},400);
         a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
       } else {
-        a=(await db.sql`SELECT a.*,s.payroll_period_id,s.required_time_in,s.required_time_out,s.is_working_day FROM attendance a JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id WHERE a.employee_id=${e.id} AND a.time_in IS NOT NULL AND a.time_out IS NULL AND s.is_working_day=true ORDER BY a.date DESC,a.time_in DESC LIMIT 1`).rows[0];
+        // Only select today's open attendance record, or yesterday's record when
+        // its scheduled shift explicitly crosses midnight. Restrict the query
+        // to open payroll periods before selecting a record so a stale record
+        // from a prior/closed shift cannot shadow today's valid shift.
+        a=(await db.sql`SELECT a.*,s.payroll_period_id,s.required_time_in,s.required_time_out,s.is_working_day
+          FROM attendance a
+          JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id
+          JOIN payroll_periods p ON p.id=s.payroll_period_id AND p.status='open'
+          WHERE a.employee_id=${e.id}
+            AND a.time_in IS NOT NULL
+            AND a.time_out IS NULL
+            AND s.is_working_day=true
+            AND (a.date=${today} OR (a.date=${previousDate} AND s.required_time_out < s.required_time_in))
+          ORDER BY CASE WHEN a.date=${today} THEN 0 ELSE 1 END, a.time_in DESC
+          LIMIT 1`).rows[0];
         if(a) s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${a.date} AND payroll_period_id=${a.payroll_period_id}`).rows[0];
-        if(!a){return json({error:'No open attendance record found. Please contact your supervisor if you forgot to time in.'},400);}
-        if(b.action==='break_out' || b.action==='break_in' || b.action==='time_out'){
-          const age=now.getTime()-new Date(a.time_in).getTime();
-          if(age>36*60*60*1000)return json({error:'The open attendance record is too old. Please contact your supervisor.'},400);
-        }
+        if(!a){return json({error:'No valid open attendance record found for today or an overnight shift from yesterday. Please contact your supervisor if you need attendance corrected.'},400);}
       }
       const p=await periodById(s.payroll_period_id); if(!p||p.status!=='open')return json({error:'Attendance is closed for this payroll period.'},400);
       if(b.action==='time_in'){

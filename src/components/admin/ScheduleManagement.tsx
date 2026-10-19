@@ -95,10 +95,11 @@ export const ScheduleManagement: React.FC = () => {
         date: formData.date,
         requiredTimeIn: formData.isWorkingDay ? formData.requiredTimeIn : undefined,
         requiredTimeOut: formData.isWorkingDay ? formData.requiredTimeOut : undefined,
-        // Do not persist hidden optional break times: scheduleBreakMinutes()
-        // uses these values when calculating payable work time.
-        breakOut: formData.isWorkingDay && formData.requireBreakOut ? formData.breakOut : undefined,
-        breakIn: formData.isWorkingDay && formData.requireBreakIn ? formData.breakIn : undefined,
+        // Preserve legacy scheduled break windows when editing older schedules whose
+        // clock actions were never mandatory. Newly disabled break windows are cleared
+        // by the checkbox handlers below, so they cannot create unintended deductions.
+        breakOut: formData.isWorkingDay ? (formData.breakOut || undefined) : undefined,
+        breakIn: formData.isWorkingDay ? (formData.breakIn || undefined) : undefined,
         requireBreakOut: formData.isWorkingDay && formData.requireBreakOut,
         requireBreakIn: formData.isWorkingDay && formData.requireBreakIn,
         isWorkingDay: formData.isWorkingDay,
@@ -488,11 +489,11 @@ export const ScheduleManagement: React.FC = () => {
 
                   <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
                     <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                      <input type="checkbox" checked={formData.requireBreakOut} onChange={(e) => setFormData({ ...formData, requireBreakOut: e.target.checked, requireBreakIn: e.target.checked ? formData.requireBreakIn : false })} className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-950 border-slate-700" />
+                      <input type="checkbox" checked={formData.requireBreakOut} onChange={(e) => setFormData({ ...formData, requireBreakOut: e.target.checked, requireBreakIn: e.target.checked ? formData.requireBreakIn : false, breakOut: e.target.checked ? formData.breakOut : '', breakIn: e.target.checked ? formData.breakIn : '' })} className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-950 border-slate-700" />
                       <span>Break Out is required</span>
                     </label>
                     <label className={`flex items-center gap-2 text-sm cursor-pointer ${formData.requireBreakOut ? 'text-slate-200' : 'text-slate-500'}`}>
-                      <input type="checkbox" checked={formData.requireBreakIn} disabled={!formData.requireBreakOut} onChange={(e) => setFormData({ ...formData, requireBreakIn: e.target.checked })} className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-950 border-slate-700" />
+                      <input type="checkbox" checked={formData.requireBreakIn} disabled={!formData.requireBreakOut} onChange={(e) => setFormData({ ...formData, requireBreakIn: e.target.checked, breakIn: e.target.checked ? formData.breakIn : '' })} className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-950 border-slate-700" />
                       <span>Break In is required</span>
                     </label>
                     <p className="text-[11px] text-slate-500">If a break is not required, employees may proceed to Time Out without recording it. Break In can only be required when Break Out is required.</p>

@@ -891,7 +891,7 @@ async function handle(request: Request) {
         a=(await db.sql`SELECT a.*,s.payroll_period_id,s.required_time_in,s.required_time_out,s.is_working_day
           FROM attendance a
           JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id
-          JOIN payroll_periods p ON p.id=s.payroll_period_id AND p.status='open'
+          JOIN payroll_periods p ON p.id=s.payroll_period_id AND p.status='open' AND a.date BETWEEN p.start_date AND p.end_date
           WHERE a.employee_id=${e.id}
             AND a.time_in IS NOT NULL
             AND a.time_out IS NULL

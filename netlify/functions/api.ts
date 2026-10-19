@@ -874,7 +874,7 @@ async function handle(request: Request) {
     if(path==='employee/clock'&&m==='POST'&&isEmployee(u)){
       const e=await employeeById(u.employeeDbId); if(!e)return json({error:'Employee record not found.'},404);
       const b=await request.json(); if(!['time_in','break_out','break_in','time_out'].includes(b.action))return json({error:'Invalid clock action.'},400);
-      const now=new Date(), ph=phNow(), today=ph.date;
+      const ph=phNow(), today=ph.date;
       const previousDateObject=new Date(`${today}T12:00:00+08:00`);
       previousDateObject.setUTCDate(previousDateObject.getUTCDate()-1);
       const previousDate=previousDateObject.toISOString().slice(0,10);

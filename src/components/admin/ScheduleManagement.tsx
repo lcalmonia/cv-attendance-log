@@ -19,6 +19,8 @@ export const ScheduleManagement: React.FC = () => {
     requiredTimeOut: '17:00',
     breakOut: '12:00',
     breakIn: '13:00',
+    requireBreakOut: true,
+    requireBreakIn: true,
     isWorkingDay: true,
     notes: 'Regular Duty Shift',
   });
@@ -95,6 +97,8 @@ export const ScheduleManagement: React.FC = () => {
         requiredTimeOut: formData.isWorkingDay ? formData.requiredTimeOut : undefined,
         breakOut: formData.isWorkingDay ? formData.breakOut : undefined,
         breakIn: formData.isWorkingDay ? formData.breakIn : undefined,
+        requireBreakOut: formData.isWorkingDay && formData.requireBreakOut,
+        requireBreakIn: formData.isWorkingDay && formData.requireBreakIn,
         isWorkingDay: formData.isWorkingDay,
         notes: formData.notes,
       });
@@ -211,6 +215,8 @@ export const ScheduleManagement: React.FC = () => {
                 requiredTimeOut: '17:00',
                 breakOut: '12:00',
                 breakIn: '13:00',
+                requireBreakOut: true,
+                requireBreakIn: true,
                 isWorkingDay: true,
                 notes: 'Regular Shift',
               });
@@ -361,6 +367,8 @@ export const ScheduleManagement: React.FC = () => {
                                 requiredTimeOut: s.requiredTimeOut || '17:00',
                                 breakOut: s.breakOut || '12:00',
                                 breakIn: s.breakIn || '13:00',
+                                requireBreakOut: Boolean(s.requireBreakOut),
+                                requireBreakIn: Boolean(s.requireBreakIn),
                                 isWorkingDay: s.isWorkingDay,
                                 notes: s.notes || '',
                               });
@@ -476,10 +484,22 @@ export const ScheduleManagement: React.FC = () => {
                     </div>
                   </div>
 
+                  <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                      <input type="checkbox" checked={formData.requireBreakOut} onChange={(e) => setFormData({ ...formData, requireBreakOut: e.target.checked, requireBreakIn: e.target.checked ? formData.requireBreakIn : false })} className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-950 border-slate-700" />
+                      <span>Break Out is required</span>
+                    </label>
+                    <label className={`flex items-center gap-2 text-sm cursor-pointer ${formData.requireBreakOut ? 'text-slate-200' : 'text-slate-500'}`}>
+                      <input type="checkbox" checked={formData.requireBreakIn} disabled={!formData.requireBreakOut} onChange={(e) => setFormData({ ...formData, requireBreakIn: e.target.checked })} className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-slate-950 border-slate-700" />
+                      <span>Break In is required</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500">If a break is not required, employees may proceed to Time Out without recording it. Break In can only be required when Break Out is required.</p>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Break Out (optional)
+                        Break Out Time
                       </label>
                       <input
                         type="time"
@@ -490,7 +510,7 @@ export const ScheduleManagement: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-300 mb-1">
-                        Break In (optional)
+                        Break In Time
                       </label>
                       <input
                         type="time"

@@ -79,6 +79,33 @@ function nightDifferentialMinutes(start: string, end: string) {
 function holidayTypeOk(v: unknown) {
   return ['regular','special_non_working','special_working'].includes(String(v ?? ''));
 }
+function scheduledNightDifferentialMinutes(a: any, s: any) {
+  if (!a?.time_in || !a?.time_out) return 0;
+  const actualIn = new Date(a.time_in);
+  const actualOut = new Date(a.time_out);
+  if (Number.isNaN(actualIn.getTime()) || Number.isNaN(actualOut.getTime()) || actualOut <= actualIn) return 0;
+
+  // Early arrival is not paid work time, including for night differential.
+  const scheduledIn = s?.date && s?.required_time_in ? scheduleDateTime(s.date, s.required_time_in) : null;
+  const effectiveStart = scheduledIn && !Number.isNaN(scheduledIn.getTime()) && scheduledIn > actualIn
+    ? scheduledIn
+    : actualIn;
+  if (actualOut <= effectiveStart) return 0;
+
+  let minutes = nightDifferentialMinutes(effectiveStart.toISOString(), actualOut.toISOString());
+  if (a?.break_out && a?.break_in) {
+    const breakStart = new Date(a.break_out);
+    const breakEnd = new Date(a.break_in);
+    if (!Number.isNaN(breakStart.getTime()) && !Number.isNaN(breakEnd.getTime())) {
+      const clippedStart = new Date(Math.max(breakStart.getTime(), effectiveStart.getTime()));
+      const clippedEnd = new Date(Math.min(breakEnd.getTime(), actualOut.getTime()));
+      if (clippedEnd > clippedStart) {
+        minutes -= nightDifferentialMinutes(clippedStart.toISOString(), clippedEnd.toISOString());
+      }
+    }
+  }
+  return Math.max(0, minutes);
+}
 function scheduleBreakMinutes(s: any) {
   return s?.break_out && s?.break_in ? minutesBetweenTimes(s.break_out, s.break_in) : 0;
 }
@@ -310,7 +337,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
       late+=metrics.lateMinutes;
       if(!holiday) overtimeMinutesTotal+=regularOvertimeMinutes;
     }
-    const nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
+    const nd=present&&a?.time_out?scheduledNightDifferentialMinutes(a,s):0;
     nightDiffMinutes+=nd;
     if(holiday&&present&&a?.time_out){
       const worked=normalizedWorkMinutes(a,s), scheduled=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s)), ot=Math.max(0,worked-scheduled);

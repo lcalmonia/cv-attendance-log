@@ -390,7 +390,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
-    employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,employmentStatus:e.employment_status,dailyRate:payrollDailyRate,
+    employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,employmentStatus:e.employment_status,dailyRate:payrollDailyRate,hourlyRate:Math.round(minuteRate*60*100)/100,
     hoursWorkedTotal:Math.round((isPartTime?totalHoursWorkedMinutes:attendanceDays.reduce((n,x)=>n+Number(x.hours||0)*60,0))/60*100)/100,
     scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overbreakMinutesTotal:overbreak,undertimeMinutesTotal:undertime,lateDeduction:lateDed,overbreakDeduction:overbreakDed,undertimeDeduction:undertimeDed,regularOvertimePay,regularOvertimeMultiplier:regularOtMultiplier,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:nightDifferentialHourlyRate,nightDifferentialMultiplier:ndMultiplier,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,

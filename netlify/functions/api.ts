@@ -278,7 +278,11 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     ? (await db.sql`SELECT daily_rate AS "dailyRate" FROM payroll_rate_snapshots WHERE payroll_period_id=${periodId} AND employee_id=${employeeId}`).rows[0]
     : null;
   const payrollDailyRate=Number(rateSnapshot?.dailyRate ?? e.daily_rate);
+  const isPartTime=e.employment_status==='part_time';
+  const requiredHoursPerDay=Math.max(1,Number(e.required_hours_per_day||8));
+  const minuteRate=payrollDailyRate/(requiredHoursPerDay*60);
   let daysWorked=0, late=0, nightDiffMinutes=0, overtimeMinutesTotal=0, holidayOvertimePay=0;
+  let partTimeRegularMinutes=0, totalHoursWorkedMinutes=0;
   const attendanceDays:any[]=[];
   for(const s of duty){
     const a=attendance.find((x:any)=>dateOnly(x.date)===dateOnly(s.date));
@@ -290,7 +294,22 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     const regularOvertimeMinutes=approvedOvertimeMinutes(a,s);
     const dateKey=dateOnly(s.date);
     const holiday=holidayMap.get(dateKey);
-    if(present){daysWorked++; late+=metrics.lateMinutes; if(!holiday) overtimeMinutesTotal+=regularOvertimeMinutes;}
+    const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
+    const scheduledPaidMinutes=Math.max(0,diffMinutes(s.required_time_in,s.required_time_out)-scheduleBreakMinutes(s));
+    if(present){
+      if(isPartTime){
+        // Part-time base pay is hourly: pay only worked minutes, excluding breaks,
+        // and cap ordinary pay at the scheduled shift. Approved overtime is paid separately.
+        const regularMinutes=Math.min(normalizedMinutes,scheduledPaidMinutes);
+        partTimeRegularMinutes+=regularMinutes;
+        totalHoursWorkedMinutes+=normalizedMinutes;
+        daysWorked+=regularMinutes/(requiredHoursPerDay*60);
+      } else {
+        daysWorked++;
+      }
+      late+=metrics.lateMinutes;
+      if(!holiday) overtimeMinutesTotal+=regularOvertimeMinutes;
+    }
     const nd=present&&a?.time_out?Math.max(0,nightDifferentialMinutes(String(a.time_in),String(a.time_out))-(a?.break_out&&a?.break_in?nightDifferentialMinutes(String(a.break_out),String(a.break_in)):0)):0;
     nightDiffMinutes+=nd;
     if(holiday&&present&&a?.time_out){
@@ -299,21 +318,22 @@ async function calculatePayroll(employeeId:string, periodId:string) {
         holidayOvertimePay+=Math.round((ot/60)*payrollDailyRate/(Math.max(1,Number(e.required_hours_per_day||8)))*Number(holiday.overtimeRate||1)*100)/100;
       }
     }
-    const normalizedMinutes=invalid?0:(present&&a?.time_out?normalizedWorkMinutes(a,s):Number(a?.total_work_minutes||0));
     attendanceDays.push({date:dateKey,status:invalid?'invalid':present?(metrics.lateMinutes>0?'late':'present'):'absent',lateMinutes:present?metrics.lateMinutes:0,undertimeMinutes:present?metrics.undertimeMinutes:0,overbreakMinutes:present?metrics.overbreakMinutes:0,varianceMinutes:present?metrics.varianceMinutes:0,overtimeMinutes:present&&!holiday?regularOvertimeMinutes:0,overtimeApprovalStatus:overtimeStatus,pendingOvertimeMinutes:present&&overtimeStatus==='pending'?rawOvertimeMinutes:0,hours:Math.round(normalizedMinutes/60*10)/10,nightDifferentialHours:nd/60,holiday:holiday?.name});
   }
-  const minuteRate=payrollDailyRate/(Math.max(1,Number(e.required_hours_per_day||8))*60);
-  const lateDed=Math.round(late*minuteRate*100)/100;
   let overbreak=0, undertime=0;
   for(const d of attendanceDays){
     overbreak += Number(d.overbreakMinutes||0);
     undertime += Number(d.undertimeMinutes||0);
   }
-  const overbreakDed=Math.round(overbreak*minuteRate*100)/100;
-  const undertimeDed=Math.round(undertime*minuteRate*100)/100;
-  const hourlyRate=payrollDailyRate/Math.max(1,Number(e.required_hours_per_day||8));
+  // For hourly part-time employees, the worked-time calculation already accounts
+  // for late arrival, early departure, and break time. Do not deduct those minutes
+  // a second time from the hourly base pay.
+  const lateDed=isPartTime?0:Math.round(late*minuteRate*100)/100;
+  const overbreakDed=isPartTime?0:Math.round(overbreak*minuteRate*100)/100;
+  const undertimeDed=isPartTime?0:Math.round(undertime*minuteRate*100)/100;
+  const hourlyRate=payrollDailyRate/requiredHoursPerDay;
   const regularOvertimePay=Math.round((overtimeMinutesTotal/60)*hourlyRate*regularOtMultiplier*100)/100;
-  const baseDutyPay=Math.round(daysWorked*payrollDailyRate*100)/100;
+  const baseDutyPay=Math.round((isPartTime?partTimeRegularMinutes*minuteRate:daysWorked*payrollDailyRate)*100)/100;
   const basic=Math.round((baseDutyPay-lateDed-overbreakDed-undertimeDed)*100)/100;
   const incR=await db.sql`SELECT * FROM incentive_programs WHERE status='active' AND (business_id=${e.business_id} OR business_id='all') AND effective_date<=${p.end_date} ORDER BY name`;
   const incentives:any[]=[];
@@ -342,7 +362,7 @@ async function calculatePayroll(employeeId:string, periodId:string) {
     });
   }
   const incentivePay=incentives.reduce((n,x)=>n+x.amount,0);
-  const nightDifferentialHourlyRate=payrollDailyRate/Math.max(1,Number(e.required_hours_per_day||8));
+  const nightDifferentialHourlyRate=payrollDailyRate/requiredHoursPerDay;
   const nightDifferentialPay=Math.round((nightDiffMinutes/60)*nightDifferentialHourlyRate*ndMultiplier*100)/100;
   const gross=Math.round((baseDutyPay+regularOvertimePay+incentivePay+nightDifferentialPay+holidayOvertimePay)*100)/100;
   const deductionSnapshotHeader=p.status==='finalized'
@@ -370,7 +390,8 @@ async function calculatePayroll(employeeId:string, periodId:string) {
   const biz=await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`;
   return {
     id:`pay_${periodId}_${employeeId}`, payrollPeriodId:periodId, employeeId, businessId:e.business_id,
-    employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,dailyRate:payrollDailyRate,
+    employeeName:e.full_name,businessName:biz.rows[0]?.name||'',position:e.position,employmentStatus:e.employment_status,dailyRate:payrollDailyRate,
+    hoursWorkedTotal:Math.round((isPartTime?totalHoursWorkedMinutes:attendanceDays.reduce((n,x)=>n+Number(x.hours||0)*60,0))/60*100)/100,
     scheduledDutyDays:duty.length,daysWorked,lateMinutesTotal:late,overbreakMinutesTotal:overbreak,undertimeMinutesTotal:undertime,lateDeduction:lateDed,overbreakDeduction:overbreakDed,undertimeDeduction:undertimeDed,regularOvertimePay,regularOvertimeMultiplier:regularOtMultiplier,overtimeMinutesTotal,overtimeHours:overtimeMinutesTotal/60,pendingOvertimeMinutesTotal:attendanceDays.reduce((n,x)=>n+Number(x.pendingOvertimeMinutes||0),0),baseDutyPay,basicPay:basic,incentivePay,nightDifferentialHours:nightDiffMinutes/60,nightDifferentialHourlyRate:nightDifferentialHourlyRate,nightDifferentialMultiplier:ndMultiplier,nightDifferentialPay,holidayOvertimePay,employeeDeductionsTotal:empD,
     recurringDeductionsTotal:recD,totalDeductions:total,grossPay:gross,netPay:net,status:p.status,
     employeeApprovedAt:appr.rows[0]?.approved_at||undefined,

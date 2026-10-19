@@ -866,7 +866,7 @@ async function handle(request: Request) {
     }
     if(path==='employee/dashboard'&&m==='GET'&&isEmployee(u)){const e=await employeeById(u.employeeDbId),biz=e?(await db.sql`SELECT name FROM businesses WHERE id=${e.business_id}`).rows[0]:null;if(!e)return json({error:'Employee record not found.'},404);const today=phNow().date;
       const previousDateObject=new Date(`${today}T12:00:00+08:00`);previousDateObject.setUTCDate(previousDateObject.getUTCDate()-1);const previousDate=previousDateObject.toISOString().slice(0,10);
-      let a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
+      let a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today} AND (time_in IS NULL OR (time_in AT TIME ZONE 'Asia/Manila')::date=date)`).rows[0];
       let s=await resolveScheduleForAttendance(e.id,today,a?.payroll_period_id||null);
       if(!a || !a.time_in){
         const open=(await db.sql`SELECT a.*,s.id AS schedule_id,s.payroll_period_id,s.required_time_in,s.required_time_out,s.break_out AS schedule_break_out,s.break_in AS schedule_break_in,s.is_working_day,s.notes FROM attendance a JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id JOIN payroll_periods p ON p.id=s.payroll_period_id AND p.status='open' AND a.date BETWEEN p.start_date AND p.end_date WHERE a.employee_id=${e.id} AND a.date=${previousDate} AND a.time_in IS NOT NULL AND a.time_out IS NULL AND (a.time_in AT TIME ZONE 'Asia/Manila')::date=a.date AND s.is_working_day=true AND s.required_time_out < s.required_time_in ORDER BY a.time_in DESC LIMIT 1`).rows[0];

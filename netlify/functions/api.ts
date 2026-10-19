@@ -884,22 +884,42 @@ async function handle(request: Request) {
         if(!s||!s.is_working_day)return json({error:'No working schedule is assigned for today.'},400);
         a=(await db.sql`SELECT * FROM attendance WHERE employee_id=${e.id} AND date=${today}`).rows[0];
       } else {
-        // Only select today's open attendance record, or yesterday's record when
-        // its scheduled shift explicitly crosses midnight. Restrict the query
-        // to open payroll periods before selecting a record so a stale record
-        // from a prior/closed shift cannot shadow today's valid shift.
+        // First prefer today's own attendance record. Do not let a prior
+        // overnight record shadow it, even if today's period has since closed;
+        // the period check below must report that closure instead.
         a=(await db.sql`SELECT a.*,s.payroll_period_id,s.required_time_in,s.required_time_out,s.is_working_day
           FROM attendance a
           JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id
-          JOIN payroll_periods p ON p.id=s.payroll_period_id AND p.status='open' AND a.date BETWEEN p.start_date AND p.end_date
+          JOIN payroll_periods p ON p.id=s.payroll_period_id AND a.date BETWEEN p.start_date AND p.end_date
           WHERE a.employee_id=${e.id}
+            AND a.date=${today}
             AND a.time_in IS NOT NULL
             AND a.time_out IS NULL
+            AND (a.time_in AT TIME ZONE 'Asia/Manila')::date=a.date
             AND s.is_working_day=true
-            AND (a.date=${today} OR (a.date=${previousDate} AND s.required_time_out < s.required_time_in))
-          ORDER BY CASE WHEN a.date=${today} THEN 0 ELSE 1 END, a.time_in DESC
+          ORDER BY a.time_in DESC
           LIMIT 1`).rows[0];
-        if(a) s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${a.date} AND payroll_period_id=${a.payroll_period_id}`).rows[0];
+        if(a) {
+          s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${a.date} AND payroll_period_id=${a.payroll_period_id}`).rows[0];
+        } else {
+          // Only fall back to yesterday when its schedule explicitly crosses
+          // midnight and the payroll period is still open. Never select an
+          // arbitrary older open record based only on elapsed time.
+          a=(await db.sql`SELECT a.*,s.payroll_period_id,s.required_time_in,s.required_time_out,s.is_working_day
+            FROM attendance a
+            JOIN schedules s ON s.employee_id=a.employee_id AND s.date=a.date AND s.payroll_period_id=a.payroll_period_id
+            JOIN payroll_periods p ON p.id=s.payroll_period_id AND p.status='open' AND a.date BETWEEN p.start_date AND p.end_date
+            WHERE a.employee_id=${e.id}
+              AND a.date=${previousDate}
+              AND a.time_in IS NOT NULL
+              AND a.time_out IS NULL
+              AND (a.time_in AT TIME ZONE 'Asia/Manila')::date=a.date
+              AND s.is_working_day=true
+              AND s.required_time_out < s.required_time_in
+            ORDER BY a.time_in DESC
+            LIMIT 1`).rows[0];
+          if(a) s=(await db.sql`SELECT * FROM schedules WHERE employee_id=${e.id} AND date=${a.date} AND payroll_period_id=${a.payroll_period_id}`).rows[0];
+        }
         if(!a){return json({error:'No valid open attendance record found for today or an overnight shift from yesterday. Please contact your supervisor if you need attendance corrected.'},400);}
       }
       const p=await periodById(s.payroll_period_id); if(!p||p.status!=='open')return json({error:'Attendance is closed for this payroll period.'},400);

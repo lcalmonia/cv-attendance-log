@@ -575,7 +575,7 @@ async function handle(request: Request) {
     }
     if(path==='admin/schedules'&&m==='GET'&&isAdmin(u)){
       const q=new URL(request.url).searchParams, per=q.get('periodId'), emp=q.get('employeeId');
-      if(per&&emp){const r=await db.sql`SELECT s.id,s.employee_id AS "employeeId",s.payroll_period_id AS "payrollPeriodId",s.date,s.required_time_in AS "requiredTimeIn",s.required_time_out AS "requiredTimeOut",s.break_out AS "breakOut",s.break_in AS "breakIn",s.is_working_day AS "isWorkingDay",s.notes,e.full_name AS "employeeName" FROM schedules s JOIN employees e ON e.id=s.employee_id WHERE s.payroll_period_id=${per} AND s.employee_id=${emp} ORDER BY s.date`;return json(r.rows.map((x:any)=>({...x,date:dateOnly(x.date)})));}
+      if(per&&emp){const r=await db.sql`SELECT s.id,s.employee_id AS "employeeId",s.payroll_period_id AS "payrollPeriodId",s.date,s.required_time_in AS "requiredTimeIn",s.required_time_out AS "requiredTimeOut",s.break_out AS "breakOut",s.break_in AS "breakIn",s.require_break_out AS "requireBreakOut",s.require_break_in AS "requireBreakIn",s.is_working_day AS "isWorkingDay",s.notes,e.full_name AS "employeeName" FROM schedules s JOIN employees e ON e.id=s.employee_id WHERE s.payroll_period_id=${per} AND s.employee_id=${emp} ORDER BY s.date`;return json(r.rows.map((x:any)=>({...x,date:dateOnly(x.date)})));}
       if(per){const r=await db.sql`SELECT s.id,s.employee_id AS "employeeId",s.payroll_period_id AS "payrollPeriodId",s.date,s.required_time_in AS "requiredTimeIn",s.required_time_out AS "requiredTimeOut",s.break_out AS "breakOut",s.break_in AS "breakIn",s.is_working_day AS "isWorkingDay",s.notes,e.full_name AS "employeeName" FROM schedules s JOIN employees e ON e.id=s.employee_id WHERE s.payroll_period_id=${per} ORDER BY s.date`;return json(r.rows.map((x:any)=>({...x,date:dateOnly(x.date)})));}
       const r=await db.sql`SELECT s.id,s.employee_id AS "employeeId",s.payroll_period_id AS "payrollPeriodId",s.date,s.required_time_in AS "requiredTimeIn",s.required_time_out AS "requiredTimeOut",s.break_out AS "breakOut",s.break_in AS "breakIn",s.is_working_day AS "isWorkingDay",s.notes,e.full_name AS "employeeName" FROM schedules s JOIN employees e ON e.id=s.employee_id ORDER BY s.date`;return json(r.rows.map((x:any)=>({...x,date:dateOnly(x.date)})));
     }
@@ -607,8 +607,8 @@ async function handle(request: Request) {
           if(date<String(next.start_date).slice(0,10)||date>String(next.end_date).slice(0,10))continue;
           const id=`sched_${randomBytes(8).toString('hex')}`;
           const ins=await client.query(
-            'INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(employee_id,payroll_period_id,date) DO NOTHING',
-            [id,s.employee_id,next.id,date,s.required_time_in,s.required_time_out,s.break_out,s.break_in,s.is_working_day,s.notes]
+            'INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,require_break_out,require_break_in,is_working_day,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(employee_id,payroll_period_id,date) DO NOTHING',
+            [id,s.employee_id,next.id,date,s.required_time_in,s.required_time_out,s.break_out,s.break_in,s.require_break_out,s.require_break_in,s.is_working_day,s.notes]
           );
           copied+=ins.rowCount||0;
         }
@@ -624,14 +624,19 @@ async function handle(request: Request) {
       const working=b.isWorkingDay!==false;
       if(working&&(!timeOk(b.requiredTimeIn)||!timeOk(b.requiredTimeOut)||!b.requiredTimeIn||!b.requiredTimeOut))return json({error:'Required time in and time out are required for working days.'},400);
       if((b.breakOut&&!timeOk(b.breakOut))||(b.breakIn&&!timeOk(b.breakIn)))return json({error:'Break times are invalid.'},400);
+      const requireBreakOut=working&&b.requireBreakOut===true;
+      const requireBreakIn=working&&b.requireBreakIn===true;
+      if(requireBreakIn&&!requireBreakOut)return json({error:'Break In cannot be required unless Break Out is also required.'},400);
+      if(requireBreakOut&&!b.breakOut)return json({error:'A Break Out time is required when Break Out is mandatory.'},400);
+      if(requireBreakIn&&!b.breakIn)return json({error:'A Break In time is required when Break In is mandatory.'},400);
       const existing=(await db.sql`SELECT id FROM schedules WHERE employee_id=${e.id} AND payroll_period_id=${p.id} AND date=${date}`).rows[0], id=existing?.id||b.id||`sched_${randomBytes(8).toString('hex')}`;
-      if(existing) await db.sql`UPDATE schedules SET required_time_in=${working?b.requiredTimeIn:null},required_time_out=${working?b.requiredTimeOut:null},break_out=${working?(b.breakOut||null):null},break_in=${working?(b.breakIn||null):null},is_working_day=${working},notes=${b.notes||''} WHERE id=${id}`;
-      else await db.sql`INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,is_working_day,notes) VALUES(${id},${e.id},${p.id},${date},${working?b.requiredTimeIn:null},${working?b.requiredTimeOut:null},${working?(b.breakOut||null):null},${working?(b.breakIn||null):null},${working},${b.notes||''})`;
+      if(existing) await db.sql`UPDATE schedules SET required_time_in=${working?b.requiredTimeIn:null},required_time_out=${working?b.requiredTimeOut:null},break_out=${working?(b.breakOut||null):null},break_in=${working?(b.breakIn||null):null},require_break_out=${requireBreakOut},require_break_in=${requireBreakIn},is_working_day=${working},notes=${b.notes||''} WHERE id=${id}`;
+      else await db.sql`INSERT INTO schedules(id,employee_id,payroll_period_id,date,required_time_in,required_time_out,break_out,break_in,require_break_out,require_break_in,is_working_day,notes) VALUES(${id},${e.id},${p.id},${date},${working?b.requiredTimeIn:null},${working?b.requiredTimeOut:null},${working?(b.breakOut||null):null},${working?(b.breakIn||null):null},${requireBreakOut},${requireBreakIn},${working},${b.notes||''})`;
       // Any schedule change can change the amount of overtime, so previously
       // approved overtime for this duty date must be reviewed again.
       await db.sql`UPDATE attendance SET overtime_approval_status=CASE WHEN time_out IS NOT NULL AND ${working} THEN 'pending' ELSE 'not_required' END,overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE employee_id=${e.id} AND date=${date} AND payroll_period_id=${p.id}`;
       const s=(await db.sql`SELECT * FROM schedules WHERE id=${id}`).rows[0];
-      return json({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,isWorkingDay:Boolean(s.is_working_day),notes:s.notes});
+      return json({id:s.id,employeeId:s.employee_id,payrollPeriodId:s.payroll_period_id,date:dateOnly(s.date),requiredTimeIn:s.required_time_in||undefined,requiredTimeOut:s.required_time_out||undefined,breakOut:s.break_out||undefined,breakIn:s.break_in||undefined,requireBreakOut:Boolean(s.require_break_out),requireBreakIn:Boolean(s.require_break_in),isWorkingDay:Boolean(s.is_working_day),notes:s.notes});
     }
     if(path.startsWith('admin/schedules/')&&m==='DELETE'&&isAdmin(u)){
       const id=path.split('/')[2], s=(await db.sql`SELECT employee_id,payroll_period_id,date FROM schedules WHERE id=${id}`).rows[0]; if(s){const p=await periodById(s.payroll_period_id); if(p?.status!=='open')return json({error:'Schedules can only be changed while the payroll period is open.'},400); await db.sql`DELETE FROM schedules WHERE id=${id}`; await db.sql`UPDATE attendance SET overtime_approval_status='not_required',overtime_reviewed_by=NULL,overtime_reviewed_at=NULL,updated_at=NOW() WHERE employee_id=${s.employee_id} AND date=${s.date} AND payroll_period_id=${s.payroll_period_id}`;} return json({success:true});
@@ -938,7 +943,8 @@ async function handle(request: Request) {
         await db.sql`UPDATE attendance SET break_in=${ph.iso},updated_at=NOW() WHERE id=${a.id}`;
       } else {
         if(a.time_out)return json({error:'Already timed out.'},400);
-        if(a.break_out&&!a.break_in)return json({error:'Please complete your break before timing out.'},400);
+        if(s.require_break_out&&!a.break_out)return json({error:'Please record Break Out before timing out.'},400);
+        if(s.require_break_in&&a.break_out&&!a.break_in)return json({error:'Please complete your break before timing out.'},400);
         const work=normalizedWorkMinutes({...a,time_out:ph.iso},s);
         const finalMetrics=attendanceVariance({...a,time_out:ph.iso},s);
         const clockOvertime=overtimeMinutes({...a,time_out:ph.iso},s);

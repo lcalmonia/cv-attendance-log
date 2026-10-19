@@ -68,6 +68,8 @@ export interface Schedule {
   requiredTimeOut?: string; // HH:mm
   breakOut?: string; // HH:mm
   breakIn?: string; // HH:mm
+  requireBreakOut?: boolean;
+  requireBreakIn?: boolean;
   isWorkingDay: boolean;
   notes?: string;
 }

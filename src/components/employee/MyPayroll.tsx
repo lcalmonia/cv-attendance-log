@@ -190,9 +190,10 @@ export const MyPayroll: React.FC = () => {
             <strong className="text-white block font-bold text-sm tracking-wide">
               TENTATIVE PAYROLL ESTIMATE
             </strong>
-            This is a preliminary projection based on your daily rate of ₱{payroll.dailyRate.toLocaleString()} and
-            attendance logged to date. Final deductions and incentives will be locked when Super Admin submits this
-            cut-off for approval.
+            This is a preliminary projection based on {payroll.employmentStatus === 'part_time'
+              ? `your hourly rate of ₱${(payroll.hourlyRate ?? 0).toFixed(2)}`
+              : `your daily rate of ₱${payroll.dailyRate.toLocaleString()}`} and attendance logged to date. Final
+            deductions and incentives will be locked when Super Admin submits this cut-off for approval.
           </div>
         </div>
       )}
@@ -275,9 +276,13 @@ export const MyPayroll: React.FC = () => {
           <div className="space-y-3 text-sm">
             <div className="flex justify-between items-center py-1">
               <div>
-                <span className="font-medium text-slate-200">Base Duty Pay</span>
+                <span className="font-medium text-slate-200">
+                  {payroll.employmentStatus === 'part_time' ? 'Hourly Duty Pay' : 'Base Duty Pay'}
+                </span>
                 <span className="text-xs text-slate-500 block">
-                  {payroll.daysWorked} days × ₱{payroll.dailyRate.toLocaleString()}
+                  {payroll.employmentStatus === 'part_time'
+                    ? `${(payroll.basePayHoursTotal || 0).toFixed(2)} regular hours × ₱${(payroll.hourlyRate ?? 0).toFixed(2)}/hr`
+                    : `${payroll.daysWorked} days × ₱${payroll.dailyRate.toLocaleString()}`}
                 </span>
               </div>
               <span className="font-mono font-semibold text-white">

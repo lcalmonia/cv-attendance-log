@@ -95,8 +95,10 @@ export const ScheduleManagement: React.FC = () => {
         date: formData.date,
         requiredTimeIn: formData.isWorkingDay ? formData.requiredTimeIn : undefined,
         requiredTimeOut: formData.isWorkingDay ? formData.requiredTimeOut : undefined,
-        breakOut: formData.isWorkingDay ? formData.breakOut : undefined,
-        breakIn: formData.isWorkingDay ? formData.breakIn : undefined,
+        // Do not persist hidden optional break times: scheduleBreakMinutes()
+        // uses these values when calculating payable work time.
+        breakOut: formData.isWorkingDay && formData.requireBreakOut ? formData.breakOut : undefined,
+        breakIn: formData.isWorkingDay && formData.requireBreakIn ? formData.breakIn : undefined,
         requireBreakOut: formData.isWorkingDay && formData.requireBreakOut,
         requireBreakIn: formData.isWorkingDay && formData.requireBreakIn,
         isWorkingDay: formData.isWorkingDay,

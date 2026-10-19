@@ -82,7 +82,9 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
                 {record.employeeId}
               </span>
               <span className="text-slate-400 print:text-gray-600 block mt-0.5">
-                Rate: ₱{record.dailyRate.toLocaleString()} / day
+                {record.employmentStatus === 'part_time'
+                  ? `Rate: ₱${(record.hourlyRate ?? 0).toFixed(2)} / hour`
+                  : `Rate: ₱${record.dailyRate.toLocaleString()} / day`}
               </span>
             </div>
           </div>
@@ -97,7 +99,9 @@ export const PayslipModal: React.FC<PayslipModalProps> = ({ record, period, onCl
               <div className="space-y-2 text-xs">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-start">
                   <span className="min-w-0 break-words text-slate-300 print:text-gray-700">
-                    Base Duty Pay ({record.daysWorked} days × ₱{record.dailyRate.toLocaleString()})
+                    {record.employmentStatus === 'part_time'
+                      ? `Hourly Duty Pay (${(record.hoursWorkedTotal || 0).toFixed(2)} hours, less break time)`
+                      : `Base Duty Pay (${record.daysWorked} days × ₱${record.dailyRate.toLocaleString()})`}
                   </span>
                   <span className="whitespace-nowrap font-mono font-medium text-white print:text-gray-900">
                     ₱{record.baseDutyPay.toLocaleString()}

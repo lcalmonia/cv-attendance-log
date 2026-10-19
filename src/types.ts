@@ -142,6 +142,7 @@ export interface PayrollRecord {
   dailyRate: number;
   hourlyRate?: number;
   hoursWorkedTotal?: number;
+  basePayHoursTotal?: number;
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;

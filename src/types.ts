@@ -68,6 +68,8 @@ export interface Schedule {
   requiredTimeOut?: string; // HH:mm
   breakOut?: string; // HH:mm
   breakIn?: string; // HH:mm
+  requireBreakOut?: boolean;
+  requireBreakIn?: boolean;
   isWorkingDay: boolean;
   notes?: string;
 }
@@ -136,7 +138,11 @@ export interface PayrollRecord {
   employeeName: string;
   businessName: string;
   position: string;
+  employmentStatus?: EmploymentStatus;
   dailyRate: number;
+  hourlyRate?: number;
+  hoursWorkedTotal?: number;
+  basePayHoursTotal?: number;
   scheduledDutyDays: number;
   daysWorked: number;
   lateMinutesTotal: number;

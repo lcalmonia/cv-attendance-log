@@ -230,11 +230,23 @@ export const PayrollManagement: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 text-xs text-slate-300">{r.businessName}</td>
                     <td className="py-3 px-4 text-xs">
-                      <div>
-                        <span className="font-semibold text-white">{r.daysWorked}</span>
-                        <span className="text-slate-500">/{r.scheduledDutyDays} days</span>
-                      </div>
-                      <span className="text-[11px] text-slate-400">₱{r.dailyRate}/day</span>
+                      {r.employmentStatus === 'part_time' ? (
+                        <>
+                          <div>
+                            <span className="font-semibold text-white">{(r.hoursWorkedTotal || 0).toFixed(2)} hrs</span>
+                            <span className="text-slate-500"> / {r.scheduledDutyDays} shifts</span>
+                          </div>
+                          <span className="text-[11px] text-slate-400">₱{(r.hourlyRate ?? 0).toFixed(2)}/hr</span>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <span className="font-semibold text-white">{r.daysWorked}</span>
+                            <span className="text-slate-500">/{r.scheduledDutyDays} days</span>
+                          </div>
+                          <span className="text-[11px] text-slate-400">₱{r.dailyRate}/day</span>
+                        </>
+                      )}
                     </td>
                     <td className="py-3 px-4 font-mono font-medium text-slate-200">
                       ₱{r.basicPay.toLocaleString()}
